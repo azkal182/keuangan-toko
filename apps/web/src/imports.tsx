@@ -4,19 +4,22 @@ import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
+import { useNavigate, useParams } from "react-router-dom";
 
 export function ImportWorkspace({ csrf, owner }: { csrf: string; owner: boolean }) {
-  const [selected, setSelected] = useState<string>();
+  const { batchId } = useParams();
+  const navigate = useNavigate();
+  const selected = batchId;
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState<string>();
   const loadBatches = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/import-batches", { signal })), [revision]);
   const batches = useResource(loadBatches);
   return <section className="stack" aria-labelledby="imports-title">
-    <div className="workspace-heading"><h2 id="imports-title">Import workbook historis</h2></div>
+    <div className="workspace-heading"><h2 id="imports-title">Import workbook historis</h2>{selected && owner && <Button variant="outline" onClick={() => navigate("/imports")}>Daftar batch</Button>}</div>
     <p className="muted">File XLSX masuk staging; belum mengubah ledger sampai baris ditinjau dan Owner menyetujui commit.</p>
     {notice && <p role="status" className="notice-success">{notice}</p>}
     <UploadForm csrf={csrf} onUploaded={(batch, duplicate) => {
-      setSelected(batch.id); setRevision((value) => value + 1);
+      navigate(`/imports/${batch.id}`); setRevision((value) => value + 1);
       setNotice(duplicate ? "File yang sama ditemukan; batch yang sudah ada dimuat kembali. Batch lama yang belum direview dapat diperbarui ke sumber sheet pelanggan." : "Berkas berhasil diproses ke staging untuk review.");
     }} />
     {owner && <section className="panel stack">
@@ -24,7 +27,7 @@ export function ImportWorkspace({ csrf, owner }: { csrf: string; owner: boolean 
       {batches.state.status === "loading" && <p role="status">Memuat batch…</p>}
       {batches.state.status === "error" && <ErrorNotice message={batches.state.error.message} retry={batches.reload} />}
       {batches.state.status === "ready" && (batches.state.data.data.length === 0 ? <p className="muted">Belum ada batch import.</p> : <ul className="customer-items">
-        {batches.state.data.data.map((batch) => <li key={batch.id}><button className="customer-row" type="button" aria-current={selected === batch.id ? "true" : undefined} onClick={() => setSelected(batch.id)}>
+        {batches.state.data.data.map((batch) => <li key={batch.id}><button className="customer-row" type="button" aria-current={selected === batch.id ? "true" : undefined} onClick={() => navigate(`/imports/${batch.id}`)}>
           <span><strong>{batch.original_filename}</strong><span className="muted">{batch.status} · {batch.total_rows} baris · {batch.accepted_rows} diterima</span></span>
           <span className="muted">{batch.file_sha256.slice(0, 12)}…</span>
         </button></li>)}
@@ -197,22 +200,22 @@ function CustomerIdentityRow({ identity, batchId, csrf, selected, selectable, on
   const pendingVariance = BigInt(identity.pending_debit_idr) - BigInt(identity.pending_credit_idr) - BigInt(identity.valid_debit_idr) + BigInt(identity.valid_credit_idr);
   return <>
     <tr>
-      <td><input type="checkbox" aria-label={`Pilih ${identity.source_name || identity.source_sheet} untuk commit`} checked={selected} disabled={!selectable} onChange={(event) => onSelected(event.target.checked)} /></td>
-      <td>{identity.source_sheet}</td>
-      <td>{identity.source_code || "—"}</td>
-      <td><strong>{identity.source_name || "Nama belum terdeteksi"}</strong></td>
-      <td>{identity.source_rows.toLocaleString("id-ID")}</td>
-      <td>{formatRupiah(identity.source_debit_idr)}</td>
-      <td>{formatRupiah(identity.source_credit_idr)}</td>
-      <td><strong>{formatRupiah(netSource.toString())}</strong></td>
-      <td><strong>{identity.valid_rows.toLocaleString("id-ID")}</strong><span className="table-subline">{identity.candidate_rows} kandidat · {identity.accepted_rows} diterima</span></td>
-      <td>{exceptionRows.toLocaleString("id-ID")}<span className="table-subline">{identity.quarantined_rows} karantina · {identity.excluded_rows} dikecualikan</span></td>
-      <td>{identity.uncomputable_amount_rows.toLocaleString("id-ID")}</td>
-      <td><strong>{formatRupiah(netValid.toString())}</strong><span className="table-subline">debit valid − kredit valid</span></td>
-      <td>{identity.uncomputable_amount_rows > 0 ? <span className="badge">Perlu rekonsiliasi</span> : <strong>{formatRupiah(pendingVariance.toString())}</strong>}<span className="table-subline">sumber belum diimpor − baris valid</span></td>
-      <td>{customerResolutionLabel(identity.resolution)}{selectable && identity.mapped_valid_rows === identity.valid_rows && !["matched_code", "matched_name", "will_create"].includes(identity.resolution) && <span className="table-subline">Semua baris valid sudah dipetakan</span>}{!selectable && identity.valid_rows > 0 && <span className="table-subline">Mapping seluruh baris valid diperlukan</span>}</td>
-      <td>{identity.customer_name || (identity.resolution === "will_create" ? "Dibuat saat commit" : "—")}</td>
-      <td><Button type="button" variant="outline" onClick={() => setOpen(true)}>{identity.valid_rows > 0 ? `Buka ${identity.valid_rows} baris valid` : "Buka review"}</Button></td>
+      <td data-label="Pilih"><input type="checkbox" aria-label={`Pilih ${identity.source_name || identity.source_sheet} untuk commit`} checked={selected} disabled={!selectable} onChange={(event) => onSelected(event.target.checked)} /></td>
+      <td data-label="Sheet pelanggan">{identity.source_sheet}</td>
+      <td data-label="Kode">{identity.source_code || "—"}</td>
+      <td data-label="Nama pelanggan"><strong>{identity.source_name || "Nama belum terdeteksi"}</strong></td>
+      <td data-label="Total baris">{identity.source_rows.toLocaleString("id-ID")}</td>
+      <td data-label="Total debit sumber">{formatRupiah(identity.source_debit_idr)}</td>
+      <td data-label="Total kredit sumber">{formatRupiah(identity.source_credit_idr)}</td>
+      <td data-label="Net saldo sumber"><strong>{formatRupiah(netSource.toString())}</strong></td>
+      <td data-label="Valid untuk diimpor"><strong>{identity.valid_rows.toLocaleString("id-ID")}</strong><span className="table-subline">{identity.candidate_rows} kandidat · {identity.accepted_rows} diterima</span></td>
+      <td data-label="Karantina / dikecualikan">{exceptionRows.toLocaleString("id-ID")}<span className="table-subline">{identity.quarantined_rows} karantina · {identity.excluded_rows} dikecualikan</span></td>
+      <td data-label="Nominal belum dihitung">{identity.uncomputable_amount_rows.toLocaleString("id-ID")}</td>
+      <td data-label="Net baris valid"><strong>{formatRupiah(netValid.toString())}</strong><span className="table-subline">debit valid − kredit valid</span></td>
+      <td data-label="Variance pending">{identity.uncomputable_amount_rows > 0 ? <span className="badge">Perlu rekonsiliasi</span> : <strong>{formatRupiah(pendingVariance.toString())}</strong>}<span className="table-subline">sumber belum diimpor − baris valid</span></td>
+      <td data-label="Pencocokan">{customerResolutionLabel(identity.resolution)}{selectable && identity.mapped_valid_rows === identity.valid_rows && !["matched_code", "matched_name", "will_create"].includes(identity.resolution) && <span className="table-subline">Semua baris valid sudah dipetakan</span>}{!selectable && identity.valid_rows > 0 && <span className="table-subline">Mapping seluruh baris valid diperlukan</span>}</td>
+      <td data-label="Pelanggan tujuan">{identity.customer_name || (identity.resolution === "will_create" ? "Dibuat saat commit" : "—")}</td>
+      <td data-label="Data pelanggan"><Button type="button" variant="outline" onClick={() => setOpen(true)}>{identity.valid_rows > 0 ? `Buka ${identity.valid_rows} baris valid` : "Buka review"}</Button></td>
     </tr>
     <Dialog open={open} onOpenChange={setOpen} title={`Data pelanggan · ${identity.source_name || identity.source_sheet}`}>
       <CustomerRowsDialog identity={identity} batchId={batchId} csrf={csrf} onChanged={onChanged} />
@@ -285,11 +288,11 @@ function ImportRowCard({ batchId, row, csrf, onSaved }: { batchId: string; row: 
   const issueText = Array.isArray(row.issues) && row.issues.length ? row.issues.map(issueLabel).join(" · ") : "Tidak ada issue otomatis";
   return <>
     <tr>
-      <td>{row.sheet_name} · {row.row_number}<span className="table-subline">{String(parsed.effective_date ?? "Tanggal tidak tersedia")}</span></td>
-      <td>{row.source_customer.name || "Nama belum terdeteksi"}{row.source_customer.code ? <span className="table-subline">Kode {row.source_customer.code}</span> : null}</td>
-      <td>{displayMoney(parsed.debit_idr)}</td><td>{displayMoney(parsed.credit_idr)}</td>
-      <td><span className="badge">{reviewStatusLabel(row.review_status)}</span></td><td className="issue-cell">{issueText}</td>
-      <td><Button variant="outline" onClick={() => setDialogOpen(true)}>Tinjau</Button></td>
+      <td data-label="Baris sumber">{row.sheet_name} · {row.row_number}<span className="table-subline">{String(parsed.effective_date ?? "Tanggal tidak tersedia")}</span></td>
+      <td data-label="Pelanggan">{row.source_customer.name || "Nama belum terdeteksi"}{row.source_customer.code ? <span className="table-subline">Kode {row.source_customer.code}</span> : null}</td>
+      <td data-label="Debit">{displayMoney(parsed.debit_idr)}</td><td data-label="Kredit">{displayMoney(parsed.credit_idr)}</td>
+      <td data-label="Status"><span className="badge">{reviewStatusLabel(row.review_status)}</span></td><td data-label="Perlu diperiksa" className="issue-cell">{issueText}</td>
+      <td data-label="Aksi"><Button variant="outline" onClick={() => setDialogOpen(true)}>Tinjau</Button></td>
     </tr>
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen} title={`Review ${row.sheet_name} · baris ${row.row_number}`}>
     <article className="stack">
@@ -297,8 +300,8 @@ function ImportRowCard({ batchId, row, csrf, onSaved }: { batchId: string; row: 
     <p><strong>Perlu diperiksa:</strong> {Array.isArray(row.issues) && row.issues.length ? row.issues.map(issueLabel).join(" · ") : "Tidak ada issue otomatis"}</p>
     <p className="muted">Pelanggan sumber: {row.source_customer.name || "Nama belum terdeteksi"}{row.source_customer.code ? ` · kode ${row.source_customer.code}` : ""}</p>
     <details><summary>Lihat nilai sumber dan kandidat</summary>
-      <div className="table-scroll"><table><thead><tr><th>Kolom</th><th>Nilai sumber</th><th>Formula</th></tr></thead><tbody>
-        {sourceCells(row.raw_values).map((cell, index) => <tr key={`${cell.column}-${index}`}><td>{cell.column}</td><td>{displayValue(cell.value)}</td><td>{cell.formula ? "Ya · nilai sumber diabaikan" : "Tidak"}</td></tr>)}
+      <div className="table-scroll"><table className="source-values-table"><thead><tr><th>Kolom</th><th>Nilai sumber</th><th>Formula</th></tr></thead><tbody>
+        {sourceCells(row.raw_values).map((cell, index) => <tr key={`${cell.column}-${index}`}><td data-label="Kolom">{cell.column}</td><td data-label="Nilai sumber">{displayValue(cell.value)}</td><td data-label="Formula">{cell.formula ? "Ya · nilai sumber diabaikan" : "Tidak"}</td></tr>)}
       </tbody></table></div>
       <dl className="aging-summary">{Object.entries(asRecord(row.parsed_values)).map(([key, value]) => <div key={key}><dt>{candidateLabel(key)}</dt><dd>{displayValue(value)}</dd></div>)}</dl>
     </details>

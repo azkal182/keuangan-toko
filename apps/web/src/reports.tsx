@@ -1,9 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, readResult, useResource, type Schema } from "./api";
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { formatRupiah } from "./ledger";
+import { formatRupiah } from "./money";
 
 const buckets: { key: Schema["AgingBucket"]; label: string }[] = [
   { key: "days_0_15", label: "0–15 hari" }, { key: "days_16_30", label: "16–30 hari" },
@@ -14,16 +15,33 @@ const buckets: { key: Schema["AgingBucket"]; label: string }[] = [
 
 export function ReceivablesAging() {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const [asOf, setAsOf] = useState(today);
-  const [applied, setApplied] = useState(today);
-  const [bucket, setBucket] = useState<Schema["AgingBucket"]>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const applied = searchParams.get("as_of") ?? today;
+  const requestedBucket = searchParams.get("bucket");
+  const bucket = buckets.find((item) => item.key === requestedBucket)?.key;
+  const [asOf, setAsOf] = useState(applied);
+  useEffect(() => setAsOf(applied), [applied]);
   const load = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/reports/receivables-aging", {
     params: { query: { as_of: applied } }, signal,
   })), [applied]);
   const { state, reload } = useResource(load);
+  function applyFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    if (asOf === today) next.delete("as_of");
+    else next.set("as_of", asOf);
+    next.delete("bucket");
+    setSearchParams(next);
+  }
+  function selectBucket(value?: Schema["AgingBucket"]) {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("bucket", value);
+    else next.delete("bucket");
+    setSearchParams(next);
+  }
   return <section className="panel stack" aria-labelledby="aging-title">
     <h2 id="aging-title">Umur piutang</h2>
-    <form className="date-form" onSubmit={(event) => { event.preventDefault(); setApplied(asOf); setBucket(undefined); }}>
+    <form className="date-form" onSubmit={applyFilters}>
       <label>Tanggal acuan<Input type="date" value={asOf} max={today} onChange={(event) => setAsOf(event.target.value)} /></label>
       <Button type="submit" variant="outline">Terapkan</Button>
     </form>
@@ -34,10 +52,10 @@ export function ReceivablesAging() {
       <p className="ledger-total"><span>Total piutang terbuka</span><strong>{formatRupiah(state.data.data.total_open_idr)}</strong></p>
       <div className="table-scroll" tabIndex={0} role="region" aria-label="Ringkasan umur piutang">
         <table><caption className="sr-only">Ringkasan umur piutang</caption><thead><tr><th>Kelompok umur</th><th className="number">Jumlah</th></tr></thead>
-          <tbody>{buckets.map(({ key, label }) => <tr key={key}><th scope="row"><button type="button" className="sale-link" aria-pressed={bucket === key} onClick={() => setBucket(key)}>{label}</button></th><td className="number">{formatRupiah(state.data.data[key])}</td></tr>)}</tbody>
+          <tbody>{buckets.map(({ key, label }) => <tr key={key}><th scope="row"><button type="button" className="sale-link" aria-pressed={bucket === key} onClick={() => selectBucket(bucket === key ? undefined : key)}>{label}</button></th><td className="number">{formatRupiah(state.data.data[key])}</td></tr>)}</tbody>
         </table>
       </div>
-      {bucket && <AgingCustomerList key={`${applied}-${bucket}`} asOf={applied} bucket={bucket} label={buckets.find((item) => item.key === bucket)?.label ?? "Rincian"} onClose={() => setBucket(undefined)} />}
+      {bucket && <AgingCustomerList key={`${applied}-${bucket}`} asOf={applied} bucket={bucket} label={buckets.find((item) => item.key === bucket)?.label ?? "Rincian"} onClose={() => selectBucket(undefined)} />}
     </>}
   </section>;
 }

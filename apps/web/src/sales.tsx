@@ -3,8 +3,7 @@ import { api, failure, readResult, useResource, type ApiFailure, type Schema } f
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { formatRupiah } from "./ledger";
-import { ReplacementLinkAction, ReverseTransactionAction } from "./corrections";
+import { formatRupiah } from "./money";
 
 type Customer = Schema["Customer"];
 type Sale = Schema["Sale"];
@@ -104,19 +103,17 @@ function SaleReview({ id, customer, csrf, owner, canWrite, onOpen, onPosted }: P
           ) : (
             <>
               <div className="table-scroll" tabIndex={0} role="region" aria-label="Item penjualan kredit">
-                <table>
+                <table className="sale-items-table">
                   <caption className="sr-only">Item penjualan kredit</caption>
                   <thead><tr><th scope="col">Uraian</th><th scope="col" className="number">Kuantitas</th><th scope="col" className="number">Harga satuan</th><th scope="col" className="number">Total item</th></tr></thead>
                   <tbody>{sale.items.map((item) => (
-                    <tr key={item.id}><td>{item.description}</td><td className="number">{item.quantity}</td>
-                      <td className="number">{formatRupiah(item.unit_price_idr)}</td><td className="number">{formatRupiah(item.line_total_idr)}</td></tr>
+                    <tr key={item.id}><td data-label="Uraian">{item.description}</td><td data-label="Kuantitas" className="number">{item.quantity}</td>
+                      <td data-label="Harga satuan" className="number">{formatRupiah(item.unit_price_idr)}</td><td data-label="Total item" className="number">{formatRupiah(item.line_total_idr)}</td></tr>
                   ))}</tbody>
                 </table>
               </div>
               <p className="ledger-total"><span>Total penjualan</span><strong>{formatRupiah(sale.total_idr)}</strong></p>
               {sale.status === "posted" && <p className="notice-success" role="status">Penjualan telah tercatat di buku piutang.</p>}
-              {owner && sale.status === "posted" && <ReverseTransactionAction id={sale.id} csrf={csrf} onChanged={() => { reload(); onPosted(); }} />}
-              {owner && sale.status === "reversed" && <ReplacementLinkAction id={sale.id} csrf={csrf} />}
               {error && <ErrorNotice message={error.message} />}
               {draft && canWrite && customer.is_active && (
                 <>

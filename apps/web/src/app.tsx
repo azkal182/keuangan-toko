@@ -1,11 +1,14 @@
-import { useCallback, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useState, type FormEvent } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, failure, readResult, useResource, type ApiFailure, type Schema } from "./api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Brand, ErrorNotice } from "./components/presentation";
-import { CustomerWorkspace } from "./customers";
+
+const CustomerWorkspace = lazy(() => import("./customers").then((module) => ({ default: module.CustomerWorkspace })));
 
 export function App() {
+  const location = useLocation();
   const [signedIn, setSignedIn] = useState<Schema["SessionDetails"]>();
   const [signedOut, setSignedOut] = useState(false);
   const load = useCallback(async (signal: AbortSignal) => {
@@ -13,16 +16,7 @@ export function App() {
     return result.response.status === 401 ? null : readResult(result).data;
   }, []);
   const { state, reload } = useResource(load);
-  const session = signedIn ?? (state.status === "ready" ? state.data : null);
-
-  if (!signedOut && session) {
-    return <CustomerWorkspace session={session} onLogout={() => {
-      setSignedIn(undefined);
-      setSignedOut(true);
-    }} />;
-  }
-
-  return (
+  const loginPage = (
     <main className="login-layout">
       <section className="login-card">
         <Brand />
@@ -39,6 +33,30 @@ export function App() {
       </section>
     </main>
   );
+
+  if (!signedOut && state.status === "loading") return loginPage;
+  const session = signedIn ?? (state.status === "ready" ? state.data : null);
+  if (!signedOut && session) return <Routes>
+    <Route path="/login" element={<ReturnToRoute />} />
+    <Route path="/*" element={<Suspense fallback={<main className="workspace"><p className="panel" role="status">Memuat aplikasi…</p></main>}><CustomerWorkspace session={session} onLogout={() => {
+      setSignedIn(undefined);
+      setSignedOut(true);
+    }} /></Suspense>} />
+  </Routes>;
+
+  return <Routes>
+    <Route path="/login" element={loginPage} />
+    <Route path="*" element={<Navigate to="/login" state={{ from: location }} replace />} />
+  </Routes>;
+}
+
+function ReturnToRoute() {
+  const location = useLocation();
+  const from = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from;
+  const target = from?.pathname?.startsWith("/") && !from.pathname.startsWith("//")
+    ? `${from.pathname}${from.search ?? ""}${from.hash ?? ""}`
+    : "/customers";
+  return <Navigate to={target} replace />;
 }
 
 function LoginForm({ onLogin }: { onLogin: (session: Schema["SessionDetails"]) => void }) {

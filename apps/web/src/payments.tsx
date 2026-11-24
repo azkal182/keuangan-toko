@@ -3,8 +3,7 @@ import { api, failure, readResult, useResource, ApiFailure, type Schema } from "
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { formatRupiah } from "./ledger";
-import { ReallocatePaymentAction, ReverseTransactionAction } from "./corrections";
+import { formatRupiah } from "./money";
 
 type Customer = Schema["Customer"];
 
@@ -15,8 +14,8 @@ function todayJakarta() {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-export function PaymentsPanel({ customer, csrf, canWrite, owner, onChanged }: {
-  customer: Customer; csrf: string; canWrite: boolean; owner: boolean; onChanged: () => void;
+export function PaymentsPanel({ customer, csrf, canWrite, onChanged }: {
+  customer: Customer; csrf: string; canWrite: boolean; onChanged: () => void;
 }) {
   const [creating, setCreating] = useState(false);
   const load = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/customers/{id}/payments", {
@@ -52,7 +51,6 @@ export function PaymentsPanel({ customer, csrf, canWrite, owner, onChanged }: {
               </p>
               {payment.note && <p className="muted">{payment.note}</p>}
               <p className="muted">Status: {payment.status}</p>
-              {owner && payment.status === "posted" && <><ReallocatePaymentAction payment={payment} csrf={csrf} onChanged={() => { reload(); onChanged(); }} /><ReverseTransactionAction id={payment.id} csrf={csrf} onChanged={() => { reload(); onChanged(); }} /></>}
               {payment.unallocated_idr !== "0" && <p>Saldo kredit: <strong>{formatRupiah(payment.unallocated_idr)}</strong></p>}
               {canWrite && payment.unallocated_idr !== "0" && (
                 <CreditApplication customer={customer} payment={payment} csrf={csrf} onApplied={() => { reload(); onChanged(); }} />
