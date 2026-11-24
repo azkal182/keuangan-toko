@@ -3540,7 +3540,14 @@
         "required": [
           "customer",
           "outstanding_idr",
-          "customer_credit_idr"
+          "customer_credit_idr",
+          "days_0_15_idr",
+          "days_16_30_idr",
+          "days_31_45_idr",
+          "days_46_60_idr",
+          "days_over_60_idr",
+          "unknown_date_idr",
+          "future_date_idr"
         ],
         "properties": {
           "customer": {
@@ -3550,9 +3557,30 @@
             "type": "string",
             "pattern": "^[0-9]+$"
           },
+          "days_0_15_idr": {
+            "type": "string"
+          },
+          "days_16_30_idr": {
+            "type": "string"
+          },
+          "days_31_45_idr": {
+            "type": "string"
+          },
+          "days_46_60_idr": {
+            "type": "string"
+          },
+          "days_over_60_idr": {
+            "type": "string"
+          },
+          "future_date_idr": {
+            "type": "string"
+          },
           "outstanding_idr": {
             "type": "string",
             "pattern": "^[0-9]+$"
+          },
+          "unknown_date_idr": {
+            "type": "string"
           }
         }
       },
@@ -4053,13 +4081,24 @@
           "effective_date",
           "reference",
           "description",
+          "quantity",
+          "unit_price_idr",
           "debit_idr",
           "credit_idr",
           "allocated_idr",
+          "remaining_idr",
+          "age_days",
           "allocation_status",
           "running_balance_idr"
         ],
         "properties": {
+          "age_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
           "allocated_idr": {
             "type": "string",
             "pattern": "^[0-9]+$"
@@ -4101,11 +4140,21 @@
           "is_reversed": {
             "type": "boolean"
           },
+          "quantity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "reference": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "remaining_idr": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
           },
           "running_balance_idr": {
             "type": "string",
@@ -4114,6 +4163,12 @@
           "source_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "unit_price_idr": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

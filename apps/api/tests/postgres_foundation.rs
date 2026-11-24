@@ -735,6 +735,20 @@ async fn customer_slice(pool: PgPool) {
     let search = json(search).await;
     assert_eq!(search["data"]["items"].as_array().unwrap().len(), 1);
     assert_eq!(search["data"]["items"][0]["customer"]["id"], CUSTOMER_A);
+    let aging_row = &search["data"]["items"][0];
+    let aged_total: i64 = [
+        "days_0_15_idr",
+        "days_16_30_idr",
+        "days_31_45_idr",
+        "days_46_60_idr",
+        "days_over_60_idr",
+        "unknown_date_idr",
+        "future_date_idr",
+    ]
+    .iter()
+    .map(|field| aging_row[*field].as_str().unwrap().parse::<i64>().unwrap())
+    .sum();
+    assert_eq!(aged_total.to_string(), aging_row["outstanding_idr"]);
 
     for (id, outstanding, credit, balance) in [
         (CUSTOMER_A, "60000", "0", "60000"),
@@ -767,6 +781,8 @@ async fn customer_slice(pool: PgPool) {
         .await;
         assert_eq!(ledger["data"]["summary"]["ledger_balance_idr"], balance);
         assert_eq!(ledger["data"]["entries"].as_array().unwrap().len(), 2);
+        assert!(ledger["data"]["entries"][0].get("remaining_idr").is_some());
+        assert!(ledger["data"]["entries"][0].get("age_days").is_some());
         assert_eq!(ledger["data"]["entries"][1]["running_balance_idr"], balance);
         assert!(
             ledger["data"]["entries"]

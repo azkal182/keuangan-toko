@@ -83,9 +83,13 @@ struct LedgerRow {
     effective_date: Option<NaiveDate>,
     reference: Option<String>,
     description: Option<String>,
+    quantity: Option<String>,
+    unit_price_idr: Option<String>,
     debit_idr: String,
     credit_idr: String,
     allocated_idr: String,
+    remaining_idr: String,
+    age_days: Option<i32>,
     allocation_status: Option<String>,
     running_balance_idr: String,
 }
@@ -100,9 +104,13 @@ impl From<LedgerRow> for LedgerEntry {
             effective_date: row.effective_date,
             reference: row.reference,
             description: row.description,
+            quantity: row.quantity,
+            unit_price_idr: row.unit_price_idr,
             debit_idr: row.debit_idr,
             credit_idr: row.credit_idr,
             allocated_idr: row.allocated_idr,
+            remaining_idr: row.remaining_idr,
+            age_days: row.age_days,
             allocation_status: row.allocation_status,
             running_balance_idr: row.running_balance_idr,
         }
@@ -152,12 +160,15 @@ pub async fn list(
                AND ($4::date IS NULL OR effective_date <= $4)
              ORDER BY position LIMIT $5
          )
-         SELECT e.id, e.entry_type, e.source_id, EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id=e.id) AS is_reversed, e.effective_date, coalesce(s.reference_no, p.reference) AS reference, coalesce(item.description, p.note) AS description,
+         SELECT e.id, e.entry_type, e.source_id, EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id=e.id) AS is_reversed, e.effective_date, coalesce(s.reference_no, p.reference) AS reference, coalesce(e.description,item.description,p.note) AS description,
+                coalesce(e.quantity,item.quantity::text) AS quantity, coalesce(e.unit_price_idr,item.unit_price_idr)::text AS unit_price_idr,
                 e.debit_idr::text, e.credit_idr::text,
                 CASE WHEN e.debit_idr > 0 THEN coalesce(debit_alloc.amount,0)::text
                      WHEN e.entry_type='legacy_payment' THEN coalesce(legacy_payment_alloc.amount,0)::text
                      ELSE coalesce(payment_alloc.amount,0)::text END AS allocated_idr,
                 e.balance::text AS running_balance_idr,
+                CASE WHEN e.debit_idr > 0 THEN greatest(e.debit_idr::numeric-coalesce(debit_alloc.amount,0),0)::text ELSE '0' END AS remaining_idr,
+                CASE WHEN e.debit_idr > 0 AND e.effective_date IS NOT NULL THEN ((now() AT TIME ZONE 'Asia/Jakarta')::date-e.effective_date)::int END AS age_days,
                 CASE WHEN e.debit_idr > 0 THEN
                     CASE WHEN debit_alloc.amount = 0 THEN 'unallocated'
                           WHEN debit_alloc.amount = e.debit_idr THEN 'allocated' ELSE 'partially_allocated' END
@@ -172,7 +183,7 @@ pub async fn list(
          LEFT JOIN payments p ON p.id = e.source_id AND p.customer_id = $1 AND e.entry_type IN ('payment','legacy_payment')
          LEFT JOIN credit_sales s ON s.id = e.source_id AND s.customer_id = $1 AND e.entry_type = 'credit_sale'
          LEFT JOIN LATERAL (
-             SELECT description FROM credit_sale_items WHERE sale_id = s.id ORDER BY ordinal LIMIT 1
+             SELECT description, quantity, unit_price_idr FROM credit_sale_items WHERE sale_id = s.id ORDER BY ordinal LIMIT 1
          ) item ON s.id IS NOT NULL
          LEFT JOIN LATERAL (
              SELECT (SELECT coalesce(sum(a.amount_idr), 0) FROM payment_allocations a JOIN payments ap ON ap.id = a.payment_id

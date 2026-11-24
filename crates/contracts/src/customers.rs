@@ -38,6 +38,13 @@ pub struct CustomerSummary {
     pub outstanding_idr: String,
     #[schema(pattern = "^[0-9]+$")]
     pub customer_credit_idr: String,
+    pub days_0_15_idr: String,
+    pub days_16_30_idr: String,
+    pub days_31_45_idr: String,
+    pub days_46_60_idr: String,
+    pub days_over_60_idr: String,
+    pub unknown_date_idr: String,
+    pub future_date_idr: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema, IntoParams)]
@@ -130,12 +137,20 @@ pub struct LedgerEntry {
     pub reference: Option<String>,
     #[schema(required = true)]
     pub description: Option<String>,
+    #[schema(required = true)]
+    pub quantity: Option<String>,
+    #[schema(required = true)]
+    pub unit_price_idr: Option<String>,
     #[schema(pattern = "^[0-9]+$")]
     pub debit_idr: String,
     #[schema(pattern = "^[0-9]+$")]
     pub credit_idr: String,
     #[schema(pattern = "^[0-9]+$")]
     pub allocated_idr: String,
+    #[schema(pattern = "^[0-9]+$")]
+    pub remaining_idr: String,
+    #[schema(required = true)]
+    pub age_days: Option<i32>,
     #[schema(required = true)]
     pub allocation_status: Option<String>,
     #[schema(pattern = "^-?[0-9]+$")]

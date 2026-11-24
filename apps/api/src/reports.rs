@@ -11,11 +11,11 @@ use crate::{
 };
 
 #[derive(sqlx::FromRow)]
-struct DebitRow {
-    customer_id: Uuid,
-    customer_name: String,
-    effective_date: Option<NaiveDate>,
-    open_idr: i64,
+pub(crate) struct DebitRow {
+    pub(crate) customer_id: Uuid,
+    pub(crate) customer_name: String,
+    pub(crate) effective_date: Option<NaiveDate>,
+    pub(crate) open_idr: i64,
 }
 
 pub async fn receivables_aging(
@@ -25,7 +25,7 @@ pub async fn receivables_aging(
     Params(query): Params<AgingQuery>,
 ) -> Result<Json<AgingResponse>, Failure> {
     let as_of = report_date(&pool, query.as_of, request).await?;
-    let rows = open_debits(&pool, request).await?;
+    let rows = open_debits(&pool, None, request).await?;
     let mut amounts = [0_i64; 7];
     let mut total = 0_i64;
     for row in rows {
@@ -61,7 +61,7 @@ pub async fn receivables_aging_customers(
 ) -> Result<Json<AgingCustomersResponse>, Failure> {
     let as_of = report_date(&pool, query.as_of, request).await?;
     let (limit, cursor) = customers::pagination(request, query.limit, query.cursor.as_deref())?;
-    let rows = open_debits(&pool, request).await?;
+    let rows = open_debits(&pool, None, request).await?;
     let mut grouped = std::collections::BTreeMap::<Uuid, (String, i64)>::new();
     for row in rows
         .into_iter()
@@ -107,7 +107,11 @@ async fn report_date(
     Ok(as_of)
 }
 
-async fn open_debits(pool: &PgPool, request: RequestId) -> Result<Vec<DebitRow>, Failure> {
+pub(crate) async fn open_debits(
+    pool: &PgPool,
+    customer_ids: Option<&[Uuid]>,
+    request: RequestId,
+) -> Result<Vec<DebitRow>, Failure> {
     let mut tx = pool.begin().await.map_err(|_| request.internal())?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         .execute(&mut *tx)
@@ -119,21 +123,22 @@ async fn open_debits(pool: &PgPool, request: RequestId) -> Result<Vec<DebitRow>,
          FROM receivable_entries e JOIN customers c ON c.id=e.customer_id
          LEFT JOIN credit_sales s ON s.id=e.source_id AND e.entry_type='credit_sale'
          LEFT JOIN LATERAL (
-           SELECT (SELECT sum(pa.amount_idr::numeric)
+           SELECT coalesce((SELECT sum(pa.amount_idr::numeric)
            FROM payment_allocations pa JOIN payments p ON p.id=pa.payment_id
-           WHERE pa.debit_entry_id=e.id AND pa.status='active' AND p.status='posted')
-           + (SELECT sum(la.amount_idr::numeric) FROM legacy_credit_allocations la WHERE la.debit_entry_id=e.id AND la.status='active') AS allocated
+           WHERE pa.debit_entry_id=e.id AND pa.status='active' AND p.status='posted'),0)
+           + coalesce((SELECT sum(la.amount_idr::numeric) FROM legacy_credit_allocations la WHERE la.debit_entry_id=e.id AND la.status='active'),0) AS allocated
          ) a ON true
-         WHERE e.debit_idr > 0 AND (e.entry_type='legacy_debit' OR (e.entry_type='credit_sale' AND s.status='posted'))
+         WHERE ($1::uuid[] IS NULL OR e.customer_id=ANY($1))
+           AND e.debit_idr > 0 AND (e.entry_type='legacy_debit' OR (e.entry_type='credit_sale' AND s.status='posted'))
            AND (e.entry_type<>'legacy_debit' OR NOT EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id=e.id))
            AND e.debit_idr::numeric > coalesce(a.allocated,0)
          ORDER BY c.id, e.effective_date NULLS LAST, e.created_at, e.id"
-    ).fetch_all(&mut *tx).await.map_err(|_| request.internal())?;
+    ).bind(customer_ids).fetch_all(&mut *tx).await.map_err(|_| request.internal())?;
     tx.commit().await.map_err(|_| request.internal())?;
     Ok(rows)
 }
 
-fn bucket(date: Option<NaiveDate>, as_of: NaiveDate) -> usize {
+pub(crate) fn bucket(date: Option<NaiveDate>, as_of: NaiveDate) -> usize {
     let Some(date) = date else { return 5 };
     let days = as_of.signed_duration_since(date).num_days();
     if days < 0 {

@@ -568,7 +568,14 @@ export interface components {
         CustomerSummary: {
             customer: components["schemas"]["Customer"];
             customer_credit_idr: string;
+            days_0_15_idr: string;
+            days_16_30_idr: string;
+            days_31_45_idr: string;
+            days_46_60_idr: string;
+            days_over_60_idr: string;
+            future_date_idr: string;
             outstanding_idr: string;
+            unknown_date_idr: string;
         };
         EmptyMeta: Record<string, never>;
         ErrorDetails: {
@@ -713,6 +720,8 @@ export interface components {
             meta: components["schemas"]["PageMeta"];
         };
         LedgerEntry: {
+            /** Format: int32 */
+            age_days: number | null;
             allocated_idr: string;
             allocation_status: string | null;
             credit_idr: string;
@@ -724,10 +733,13 @@ export interface components {
             /** Format: uuid */
             id: string;
             is_reversed: boolean;
+            quantity: string | null;
             reference: string | null;
+            remaining_idr: string;
             running_balance_idr: string;
             /** Format: uuid */
             source_id: string;
+            unit_price_idr: string | null;
         };
         LedgerPage: {
             entries: components["schemas"]["LedgerEntry"][];
