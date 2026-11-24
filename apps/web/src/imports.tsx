@@ -1,10 +1,23 @@
 import { useCallback, useState, type FormEvent } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import {
+  Upload,
+  FileSpreadsheet,
+  AlertCircle,
+  CheckCircle2,
+  List,
+  Layers,
+  ChevronRight,
+  ExternalLink,
+} from "lucide-react";
 import { api, failure, readResult, useResource, type Schema } from "./api";
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
 import { Input } from "./components/ui/input";
-import { useNavigate, useParams } from "react-router-dom";
+import { Badge } from "./components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { MoneyDisplay } from "./components/money-display";
 
 export function ImportWorkspace({ csrf, owner }: { csrf: string; owner: boolean }) {
   const { batchId } = useParams();
@@ -12,179 +25,588 @@ export function ImportWorkspace({ csrf, owner }: { csrf: string; owner: boolean 
   const selected = batchId;
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState<string>();
-  const loadBatches = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/import-batches", { signal })), [revision]);
+
+  const loadBatches = useCallback(
+    async (signal: AbortSignal) => readResult(await api.GET("/api/v1/import-batches", { signal })),
+    [revision],
+  );
   const batches = useResource(loadBatches);
-  return <section className="stack" aria-labelledby="imports-title">
-    <div className="workspace-heading"><h2 id="imports-title">Import workbook historis</h2>{selected && owner && <Button variant="outline" onClick={() => navigate("/imports")}>Daftar batch</Button>}</div>
-    <p className="muted">File XLSX masuk staging; belum mengubah ledger sampai baris ditinjau dan Owner menyetujui commit.</p>
-    {notice && <p role="status" className="notice-success">{notice}</p>}
-    <UploadForm csrf={csrf} onUploaded={(batch, duplicate) => {
-      navigate(`/imports/${batch.id}`); setRevision((value) => value + 1);
-      setNotice(duplicate ? "File yang sama ditemukan; batch yang sudah ada dimuat kembali. Batch lama yang belum direview dapat diperbarui ke sumber sheet pelanggan." : "Berkas berhasil diproses ke staging untuk review.");
-    }} />
-    {owner && <section className="panel stack">
-      <h3>Batch staging</h3>
-      {batches.state.status === "loading" && <p role="status">Memuat batch…</p>}
-      {batches.state.status === "error" && <ErrorNotice message={batches.state.error.message} retry={batches.reload} />}
-      {batches.state.status === "ready" && (batches.state.data.data.length === 0 ? <p className="muted">Belum ada batch import.</p> : <ul className="customer-items">
-        {batches.state.data.data.map((batch) => <li key={batch.id}><button className="customer-row" type="button" aria-current={selected === batch.id ? "true" : undefined} onClick={() => navigate(`/imports/${batch.id}`)}>
-          <span><strong>{batch.original_filename}</strong><span className="muted">{batch.status} · {batch.total_rows} baris · {batch.accepted_rows} diterima</span></span>
-          <span className="muted">{batch.file_sha256.slice(0, 12)}…</span>
-        </button></li>)}
-      </ul>)}
-    </section>}
-    {owner && selected && <BatchReview key={selected} id={selected} csrf={csrf} refreshKey={revision} onChanged={() => setRevision((value) => value + 1)} />}
-  </section>;
+
+  return (
+    <div className="space-y-6">
+      <Card className="border-slate-200/90 shadow-2xs">
+        <CardHeader className="border-b border-slate-100 pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-800" />
+                <CardTitle className="text-base font-bold text-slate-900">
+                  Import Workbook Historis (Excel XLSX)
+                </CardTitle>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Unggah catatan keuangan Excel untuk ditelaah di staging sebelum dimasukkan resmi ke buku piutang.
+              </p>
+            </div>
+
+            {selected && owner && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate("/imports")}
+                className="gap-1.5 text-xs text-slate-700"
+              >
+                <List className="h-3.5 w-3.5" />
+                <span>Lihat Semua Batch</span>
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-6 space-y-6">
+          {notice && (
+            <div className="flex items-center gap-2 p-3.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-medium">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>{notice}</span>
+            </div>
+          )}
+
+          <UploadForm
+            csrf={csrf}
+            onUploaded={(batch, duplicate) => {
+              navigate(`/imports/${batch.id}`);
+              setRevision((val) => val + 1);
+              setNotice(
+                duplicate
+                  ? "File yang sama ditemukan; batch sebelumnya dimuat kembali untuk ditinjau."
+                  : "Berkas Excel berhasil diunggah ke staging untuk proses telaah (review).",
+              );
+            }}
+          />
+
+          {owner && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-slate-400" />
+                  <span>Daftar Batch Staging</span>
+                </h4>
+              </div>
+
+              {batches.state.status === "loading" && (
+                <div className="p-8 text-center text-xs text-slate-500">Memuat daftar batch…</div>
+              )}
+
+              {batches.state.status === "error" && (
+                <ErrorNotice message={batches.state.error.message} retry={batches.reload} />
+              )}
+
+              {batches.state.status === "ready" && (
+                batches.state.data.data.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-4 text-center">Belum ada batch import yang diunggah.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white shadow-2xs overflow-hidden">
+                    {batches.state.data.data.map((batch) => {
+                      const isCurrent = selected === batch.id;
+                      return (
+                        <button
+                          key={batch.id}
+                          type="button"
+                          onClick={() => navigate(`/imports/${batch.id}`)}
+                          className={`w-full text-left p-4 flex items-center justify-between gap-4 transition-colors cursor-pointer ${
+                            isCurrent ? "bg-emerald-50/60 border-l-4 border-l-emerald-800" : "hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-xs text-slate-900">{batch.original_filename}</span>
+                              <Badge
+                                variant={
+                                  batch.status === "committed"
+                                    ? "success"
+                                    : batch.status === "reviewing"
+                                    ? "warning"
+                                    : "secondary"
+                                }
+                                className="text-[10px]"
+                              >
+                                {batch.status}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
+                              <span>Total {batch.total_rows.toLocaleString("id-ID")} baris</span>
+                              <span>•</span>
+                              <span>{batch.accepted_rows.toLocaleString("id-ID")} diterima</span>
+                              <span>•</span>
+                              <span>SHA: {batch.file_sha256.slice(0, 8)}…</span>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-slate-400" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
+          {owner && selected && (
+            <div className="pt-4 border-t border-slate-200">
+              <BatchReview
+                key={selected}
+                id={selected}
+                csrf={csrf}
+                refreshKey={revision}
+                onChanged={() => setRevision((value) => value + 1)}
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
-function UploadForm({ csrf, onUploaded }: { csrf: string; onUploaded: (batch: Schema["ImportBatchSummary"], duplicate: boolean) => void }) {
+function UploadForm({
+  csrf,
+  onUploaded,
+}: {
+  csrf: string;
+  onUploaded: (batch: Schema["ImportBatchSummary"], duplicate: boolean) => void;
+}) {
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
+
   async function upload(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(undefined); setPending(true);
+    event.preventDefault();
+    setError(undefined);
+    setPending(true);
     const formElement = event.currentTarget;
     try {
       const file = new FormData(formElement).get("file");
-      if (!(file instanceof File) || !file.name.toLowerCase().endsWith(".xlsx")) throw new Error("Pilih berkas .xlsx.");
-      const form = new FormData(); form.append("file", file);
+      if (!(file instanceof File) || !file.name.toLowerCase().endsWith(".xlsx")) {
+        throw new Error("Pilih berkas format .xlsx yang valid.");
+      }
+      const form = new FormData();
+      form.append("file", file);
       const result = await api.POST("/api/v1/import-batches", {
         params: { header: { "X-CSRF-Token": csrf } },
         body: form as unknown as Schema["UploadImport"],
       });
       onUploaded(readResult(result).data, result.response.status === 200);
       formElement.reset();
-    } catch (failureValue) { setError(failureValue instanceof Error ? failureValue.message : failure(failureValue).message); }
-    finally { setPending(false); }
+    } catch (failureValue) {
+      setError(failureValue instanceof Error ? failureValue.message : failure(failureValue).message);
+    } finally {
+      setPending(false);
+    }
   }
-  return <section className="panel stack"><h3>Unggah XLSX · maksimum 25 MiB</h3>
-    <form className="date-form" onSubmit={upload}>
-      <label>Berkas sumber<Input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>
-      <Button type="submit" disabled={pending}>{pending ? "Memeriksa dan staging…" : "Unggah untuk review"}</Button>
-    </form>
-    {error && <ErrorNotice message={error} />}
-  </section>;
+
+  return (
+    <div className="p-5 rounded-2xl border-2 border-dashed border-emerald-300/80 bg-emerald-50/20">
+      <form onSubmit={upload} className="flex flex-col sm:flex-row items-center gap-4">
+        <div className="flex-1 w-full space-y-1">
+          <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5" htmlFor="upload-xlsx">
+            <Upload className="h-4 w-4 text-emerald-800" />
+            <span>Pilih Berkas Excel Workbook Toko (.xlsx, maks. 25 MiB)</span>
+          </label>
+          <Input
+            id="upload-xlsx"
+            name="file"
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            required
+            className="text-xs file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-100 file:text-emerald-900 hover:file:bg-emerald-200"
+          />
+        </div>
+
+        <Button type="submit" disabled={pending} className="gap-2 shrink-0 font-semibold self-end sm:self-auto">
+          <Upload className="h-4 w-4" />
+          <span>{pending ? "Memproses Staging…" : "Unggah & Telaah Staging"}</span>
+        </Button>
+      </form>
+
+      {error && <div className="mt-3"><ErrorNotice message={error} /></div>}
+    </div>
+  );
 }
 
-function BatchReview({ id, csrf, refreshKey, onChanged }: { id: string; csrf: string; refreshKey: number; onChanged: () => void }) {
+function BatchReview({
+  id,
+  csrf,
+  refreshKey,
+  onChanged,
+}: {
+  id: string;
+  csrf: string;
+  refreshKey: number;
+  onChanged: () => void;
+}) {
   const [refresh, setRefresh] = useState(0);
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
-  const load = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/import-batches/{id}", { params: { path: { id } }, signal })), [id, refresh, refreshKey]);
+
+  const load = useCallback(
+    async (signal: AbortSignal) =>
+      readResult(
+        await api.GET("/api/v1/import-batches/{id}", {
+          params: { path: { id } },
+          signal,
+        }),
+      ),
+    [id, refresh, refreshKey],
+  );
   const batch = useResource(load);
-  const loadCustomerIdentities = useCallback(async (signal: AbortSignal) => {
-    const prepared = readResult(await api.POST("/api/v1/import-batches/{id}/customer-identities/prepare", { params: { path: { id }, header: { "X-CSRF-Token": csrf } }, signal }));
-    if (prepared.data.updated_sheets > 0) setRefresh((value) => value + 1);
-    return readResult(await api.GET("/api/v1/import-batches/{id}/customer-identities", { params: { path: { id }, signal } }));
-  }, [id, refresh, refreshKey, csrf]);
+
+  const loadCustomerIdentities = useCallback(
+    async (signal: AbortSignal) => {
+      const prepared = readResult(
+        await api.POST("/api/v1/import-batches/{id}/customer-identities/prepare", {
+          params: { path: { id }, header: { "X-CSRF-Token": csrf } },
+          signal,
+        }),
+      );
+      if (prepared.data.updated_sheets > 0) setRefresh((val) => val + 1);
+      return readResult(
+        await api.GET("/api/v1/import-batches/{id}/customer-identities", {
+          params: { path: { id }, signal },
+        }),
+      );
+    },
+    [id, refresh, refreshKey, csrf],
+  );
   const customerIdentities = useResource(loadCustomerIdentities);
+
   const [commitError, setCommitError] = useState<string>();
   const [committing, setCommitting] = useState(false);
   const [variance, setVariance] = useState("");
   const [varianceReason, setVarianceReason] = useState("");
-  const identities = customerIdentities.state.status === "ready"
-    ? [...customerIdentities.state.data.data].sort((a, b) => b.valid_rows - a.valid_rows || a.source_sheet.localeCompare(b.source_sheet, "id"))
-    : [];
-  const plannedCustomerCount = identities.filter((identity) => identity.resolution === "will_create").length;
-  const unresolvedIdentityCount = customerIdentities.state.status === "ready" ? customerIdentities.state.data.data.filter((identity) => ["ambiguous", "missing_identity", "formula_identity", "inactive_match"].includes(identity.resolution)).length : 0;
-  const selectedCustomers = identities.filter((identity) => selectedSheets.includes(identity.source_sheet));
-  const selectedValidRows = selectedCustomers.reduce((sum, identity) => sum + identity.valid_rows, 0);
-  const selectedUncomputableRows = selectedCustomers.reduce((sum, identity) => sum + identity.uncomputable_amount_rows, 0);
-  const selectedPendingDebit = selectedCustomers.reduce((sum, identity) => sum + BigInt(identity.pending_debit_idr), 0n);
-  const selectedPendingCredit = selectedCustomers.reduce((sum, identity) => sum + BigInt(identity.pending_credit_idr), 0n);
-  const selectedValidDebit = selectedCustomers.reduce((sum, identity) => sum + BigInt(identity.valid_debit_idr), 0n);
-  const selectedValidCredit = selectedCustomers.reduce((sum, identity) => sum + BigInt(identity.valid_credit_idr), 0n);
-  const selectedKnownVariance = selectedCustomers.reduce((sum, identity) => sum + BigInt(identity.pending_debit_idr) - BigInt(identity.pending_credit_idr) - BigInt(identity.valid_debit_idr) + BigInt(identity.valid_credit_idr), 0n);
+
+  const identities =
+    customerIdentities.state.status === "ready"
+      ? [...customerIdentities.state.data.data].sort(
+          (a, b) => b.valid_rows - a.valid_rows || a.source_sheet.localeCompare(b.source_sheet, "id"),
+        )
+      : [];
+
+  const plannedCustomerCount = identities.filter((i) => i.resolution === "will_create").length;
+  const selectedCustomers = identities.filter((i) => selectedSheets.includes(i.source_sheet));
+  const selectedValidRows = selectedCustomers.reduce((sum, i) => sum + i.valid_rows, 0);
+  const selectedUncomputableRows = selectedCustomers.reduce((sum, i) => sum + i.uncomputable_amount_rows, 0);
+  const selectedPendingDebit = selectedCustomers.reduce((sum, i) => sum + BigInt(i.pending_debit_idr), 0n);
+  const selectedPendingCredit = selectedCustomers.reduce((sum, i) => sum + BigInt(i.pending_credit_idr), 0n);
+  const selectedValidDebit = selectedCustomers.reduce((sum, i) => sum + BigInt(i.valid_debit_idr), 0n);
+  const selectedValidCredit = selectedCustomers.reduce((sum, i) => sum + BigInt(i.valid_credit_idr), 0n);
+  const selectedKnownVariance =
+    selectedPendingDebit - selectedPendingCredit - selectedValidDebit + selectedValidCredit;
   const varianceRequired = selectedCustomers.length > 0 && (selectedUncomputableRows > 0 || selectedKnownVariance !== 0n);
+
   function canCommitIdentity(identity: Schema["ImportCustomerIdentityPreview"]): boolean {
-    return identity.valid_rows > 0 && (["matched_code", "matched_name", "will_create"].includes(identity.resolution) || identity.mapped_valid_rows === identity.valid_rows);
+    return (
+      identity.valid_rows > 0 &&
+      (["matched_code", "matched_name", "will_create"].includes(identity.resolution) ||
+        identity.mapped_valid_rows === identity.valid_rows)
+    );
   }
+
   function toggleCustomer(sheet: string, checked: boolean) {
-    const nextSheets = checked ? [...new Set([...selectedSheets, sheet])] : selectedSheets.filter((item) => item !== sheet);
+    const nextSheets = checked
+      ? [...new Set([...selectedSheets, sheet])]
+      : selectedSheets.filter((item) => item !== sheet);
     const nextCustomers = identities.filter((identity) => nextSheets.includes(identity.source_sheet));
     const nextUnknownRows = nextCustomers.reduce((sum, identity) => sum + identity.uncomputable_amount_rows, 0);
-    const nextVariance = nextCustomers.reduce((sum, identity) => sum + BigInt(identity.pending_debit_idr) - BigInt(identity.pending_credit_idr) - BigInt(identity.valid_debit_idr) + BigInt(identity.valid_credit_idr), 0n);
+    const nextVariance = nextCustomers.reduce(
+      (sum, identity) =>
+        sum +
+        BigInt(identity.pending_debit_idr) -
+        BigInt(identity.pending_credit_idr) -
+        BigInt(identity.valid_debit_idr) +
+        BigInt(identity.valid_credit_idr),
+      0n,
+    );
     setSelectedSheets(nextSheets);
     setVariance(nextUnknownRows === 0 && nextCustomers.length > 0 ? nextVariance.toString() : "");
-    setVarianceReason(""); setCommitError(undefined);
+    setVarianceReason("");
+    setCommitError(undefined);
   }
+
   async function commit() {
-    if (batch.state.status !== "ready" || customerIdentities.state.status !== "ready" || !selectedCustomers.length) return;
-    setCommitError(undefined); setCommitting(true);
+    if (batch.state.status !== "ready" || customerIdentities.state.status !== "ready" || !selectedCustomers.length)
+      return;
+    setCommitError(undefined);
+    setCommitting(true);
     try {
       let allIds: string[] = [];
       for (const customer of selectedCustomers) {
         let next: string | null | undefined;
         do {
-          const page = readResult(await api.GET("/api/v1/import-batches/{id}/rows", { params: { path: { id }, query: { ...(next ? { cursor: next } : {}), limit: 100, sheet_name: customer.source_sheet } } }));
-          allIds = allIds.concat(page.data.filter((row) => row.review_status === "accepted" || row.review_status === "candidate").map((row) => row.id));
+          const page = readResult(
+            await api.GET("/api/v1/import-batches/{id}/rows", {
+              params: {
+                path: { id },
+                query: { ...(next ? { cursor: next } : {}), limit: 100, sheet_name: customer.source_sheet },
+              },
+            }),
+          );
+          allIds = allIds.concat(
+            page.data
+              .filter((row) => row.review_status === "accepted" || row.review_status === "candidate")
+              .map((row) => row.id),
+          );
           next = page.meta.next_cursor;
         } while (next);
       }
-      if (!allIds.length) throw new Error("Pilih pelanggan yang memiliki baris valid untuk diimpor.");
-      if (varianceRequired && !variance.trim()) throw new Error("Masukkan variance hasil rekonsiliasi untuk pelanggan yang dipilih.");
-      if (variance.trim() && variance.trim() !== "0" && !varianceReason.trim()) throw new Error("Masukkan alasan untuk variance nonnol.");
+
+      if (!allIds.length) throw new Error("Pilih pelanggan yang memiliki baris transaksi valid.");
+      if (varianceRequired && !variance.trim())
+        throw new Error("Masukkan nilai variance hasil rekonsiliasi untuk pelanggan terpilih.");
+      if (variance.trim() && variance.trim() !== "0" && !varianceReason.trim())
+        throw new Error("Masukkan alasan catatan audit untuk variance non-nol.");
+
       const result = await api.POST("/api/v1/import-batches/{id}/commit", {
-        params: { path: { id }, header: { "X-CSRF-Token": csrf, "Idempotency-Key": crypto.randomUUID() } },
-        body: { expected_version: batch.state.data.data.version, row_ids: allIds, variance_idr: variance || undefined, variance_reason: varianceReason || undefined },
+        params: {
+          path: { id },
+          header: { "X-CSRF-Token": csrf, "Idempotency-Key": crypto.randomUUID() },
+        },
+        body: {
+          expected_version: batch.state.data.data.version,
+          row_ids: allIds,
+          variance_idr: variance || undefined,
+          variance_reason: varianceReason || undefined,
+        },
       });
+
       const data = readResult(result);
-      const remaining = Math.max(0, batch.state.data.data.candidate_rows + batch.state.data.data.accepted_rows - selectedValidRows);
-      setSelectedSheets([]); setVariance(""); setVarianceReason("");
-      onChanged(); setRefresh((value) => value + 1);
-      setCommitError(data.data.status === "reviewing" ? `Commit berhasil: ${data.data.committed_rows} baris dari ${selectedCustomers.length} pelanggan. Batch tetap terbuka; ${remaining.toLocaleString("id-ID")} baris valid lain atau exception masih dapat ditinjau nanti.` : `Import selesai: ${data.data.committed_rows} baris, ${data.data.created_customers} pelanggan baru, variance ${data.data.variance_idr}.`);
-    } catch (value) { setCommitError(failure(value).message); }
-    finally { setCommitting(false); }
+      setSelectedSheets([]);
+      setVariance("");
+      setVarianceReason("");
+      onChanged();
+      setRefresh((val) => val + 1);
+      setCommitError(
+        data.data.status === "reviewing"
+          ? `Commit berhasil: ${data.data.committed_rows} baris dari ${selectedCustomers.length} pelanggan telah masuk ledger. Batch tetap dibuka untuk baris sisa.`
+          : `Import tuntas: ${data.data.committed_rows} baris berhasil dimasukkan ke buku piutang.`,
+      );
+    } catch (err) {
+      setCommitError(failure(err).message);
+    } finally {
+      setCommitting(false);
+    }
   }
-  return <section className="panel stack">
-    <h3>Review batch</h3>
-    {batch.state.status === "loading" && <p role="status">Memuat ringkasan batch…</p>}
-    {batch.state.status === "error" && <ErrorNotice message={batch.state.error.message} retry={batch.reload} />}
-    {batch.state.status === "ready" && <>
-      <section className="import-summary" aria-label="Ringkasan keseluruhan batch">
-        <div className="import-summary-heading"><div><span className="eyebrow">RINGKASAN KESELURUHAN</span><h4>{batch.state.data.data.original_filename}</h4></div><span className={`status-pill status-${batch.state.data.data.status}`}>{batch.state.data.data.status}</span></div>
-        <div className="import-summary-grid">
-          <SummaryMetric label="Total baris" value={batch.state.data.data.total_rows.toLocaleString("id-ID")} />
-          <SummaryMetric label="Total saldo debit" value={formatRupiah(batch.state.data.data.source_debit_idr)} />
-          <SummaryMetric label="Total saldo kredit" value={formatRupiah(batch.state.data.data.source_credit_idr)} />
-          <SummaryMetric label="Nominal belum dapat dihitung" value={batch.state.data.data.uncomputable_amount_rows.toLocaleString("id-ID")} />
-          <SummaryMetric label="Kandidat" value={batch.state.data.data.candidate_rows.toLocaleString("id-ID")} />
-          <SummaryMetric label="Diterima" value={batch.state.data.data.accepted_rows.toLocaleString("id-ID")} />
-          <SummaryMetric label="Karantina" value={batch.state.data.data.quarantined_rows.toLocaleString("id-ID")} />
-          <SummaryMetric label="Dikecualikan" value={batch.state.data.data.excluded_rows.toLocaleString("id-ID")} />
-          <SummaryMetric label="Sudah diimpor" value={batch.state.data.data.committed_rows.toLocaleString("id-ID")} />
+
+  return (
+    <div className="space-y-6">
+      {batch.state.status === "loading" && <p className="text-xs text-slate-500">Memuat rincian batch…</p>}
+      {batch.state.status === "error" && <ErrorNotice message={batch.state.error.message} retry={batch.reload} />}
+
+      {batch.state.status === "ready" && (
+        <div className="space-y-6">
+          {/* Batch Metrics Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+              <span className="text-[11px] text-slate-500 font-medium">Total Baris</span>
+              <p className="font-mono text-base font-bold text-slate-900 mt-0.5">
+                {batch.state.data.data.total_rows.toLocaleString("id-ID")}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+              <span className="text-[11px] text-slate-500 font-medium">Debit Sumber</span>
+              <p className="font-mono text-sm font-bold text-amber-900 mt-0.5">
+                <MoneyDisplay amount={batch.state.data.data.source_debit_idr} size="sm" variant="debit" />
+              </p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+              <span className="text-[11px] text-slate-500 font-medium">Kredit Sumber</span>
+              <p className="font-mono text-sm font-bold text-emerald-800 mt-0.5">
+                <MoneyDisplay amount={batch.state.data.data.source_credit_idr} size="sm" variant="credit" />
+              </p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+              <span className="text-[11px] text-slate-500 font-medium">Baris Diterima</span>
+              <p className="font-mono text-base font-bold text-emerald-700 mt-0.5">
+                {batch.state.data.data.accepted_rows.toLocaleString("id-ID")}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+              <span className="text-[11px] text-slate-500 font-medium">Karantina</span>
+              <p className="font-mono text-base font-bold text-rose-700 mt-0.5">
+                {batch.state.data.data.quarantined_rows.toLocaleString("id-ID")}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+              <span className="text-[11px] text-slate-500 font-medium">Sudah Diimpor</span>
+              <p className="font-mono text-base font-bold text-slate-700 mt-0.5">
+                {batch.state.data.data.committed_rows.toLocaleString("id-ID")}
+              </p>
+            </div>
+          </div>
+
+          {/* Customer Reconciliation Table */}
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Daftar Rekonsiliasi Per Sheet Pelanggan ({identities.length})
+                </h4>
+                <p className="text-xs text-slate-500">
+                  {plannedCustomerCount} pelanggan baru akan dibuat otomatis saat commit. Centang pelanggan yang ingin Anda impor ke ledger sekarang.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 overflow-x-auto shadow-2xs">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[11px]">
+                  <tr>
+                    <th className="p-3 pl-4 w-10 text-center">Pilih</th>
+                    <th className="p-3">Sheet</th>
+                    <th className="p-3">Pelanggan</th>
+                    <th className="p-3 text-right">Debit Sumber</th>
+                    <th className="p-3 text-right">Kredit Sumber</th>
+                    <th className="p-3 text-right font-bold">Net Saldo</th>
+                    <th className="p-3 text-right text-emerald-700">Baris Valid</th>
+                    <th className="p-3 text-right text-rose-700">Karantina</th>
+                    <th className="p-3">Status Cocok</th>
+                    <th className="p-3 pr-4 text-center">Tinjau</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {identities.map((identity) => (
+                    <CustomerIdentityRow
+                      key={identity.source_sheet}
+                      batchId={id}
+                      identity={identity}
+                      csrf={csrf}
+                      selected={selectedSheets.includes(identity.source_sheet)}
+                      selectable={canCommitIdentity(identity)}
+                      onSelected={(chk) => toggleCustomer(identity.source_sheet, chk)}
+                      onChanged={() => {
+                        setRefresh((val) => val + 1);
+                        onChanged();
+                      }}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Selected Customer Commit Card */}
+          {selectedCustomers.length > 0 && (
+            <Card className="border-emerald-300 bg-emerald-50/30 p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-emerald-950">
+                    Konfirmasi Commit Pelanggan Terpilih
+                  </h4>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    <strong>{selectedCustomers.length} pelanggan</strong> dipilih •{" "}
+                    <strong>{selectedValidRows.toLocaleString("id-ID")} baris transaksi</strong> akan resmi dimasukkan ke ledger.
+                  </p>
+                </div>
+              </div>
+
+              {/* Variance Visual Summary */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-xl bg-white border border-emerald-200 text-xs">
+                <div>
+                  <span className="text-slate-500">Net Sumber Belum Diimpor:</span>
+                  <div className="mt-1">
+                    <MoneyDisplay
+                      amount={(selectedPendingDebit - selectedPendingCredit).toString()}
+                      size="md"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-slate-500">Net Baris Valid:</span>
+                  <div className="mt-1">
+                    <MoneyDisplay
+                      amount={(selectedValidDebit - selectedValidCredit).toString()}
+                      size="md"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-slate-500">Variance Terhitung:</span>
+                  <div className="mt-1 font-bold">
+                    {selectedUncomputableRows > 0 ? (
+                      <span className="text-amber-800">Perlu Rekonsiliasi Owner</span>
+                    ) : (
+                      <MoneyDisplay
+                        amount={selectedKnownVariance.toString()}
+                        size="md"
+                        variant={selectedKnownVariance === 0n ? "success" : "danger"}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {varianceRequired && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-800" htmlFor="variance-idr">
+                      Variance IDR (Wajib)
+                    </label>
+                    <Input
+                      id="variance-idr"
+                      value={variance}
+                      onChange={(e) => setVariance(e.target.value)}
+                      placeholder={selectedKnownVariance.toString()}
+                      className="text-xs font-mono font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-800" htmlFor="variance-reason">
+                      Alasan Selisih / Catatan Rekonsiliasi (Wajib)
+                    </label>
+                    <Input
+                      id="variance-reason"
+                      value={varianceReason}
+                      onChange={(e) => setVarianceReason(e.target.value)}
+                      maxLength={1000}
+                      placeholder="Jelaskan alasan selisih untuk audit…"
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  onClick={commit}
+                  disabled={committing || selectedCustomers.some((i) => !canCommitIdentity(i))}
+                  className="gap-2 font-semibold"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>{committing ? "Menyimpan ke Ledger…" : `Commit ${selectedValidRows.toLocaleString("id-ID")} Baris`}</span>
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {commitError && (
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-800">
+              {commitError}
+            </div>
+          )}
         </div>
-      </section>
-      <p className="muted">Sumber import adalah sheet pelanggan bernama; sheet Analisa dan saldo formula tidak dipakai. Pilih pelanggan yang ingin diimpor sekarang. Pelanggan lain tetap di staging dan dapat dikomit nanti. {plannedCustomerCount} pelanggan baru akan dibuat otomatis saat pelanggan tersebut dikomit.</p>
-      {customerIdentities.state.status === "loading" && <p role="status">Mencocokkan identitas pelanggan…</p>}
-      {customerIdentities.state.status === "error" && <ErrorNotice message={customerIdentities.state.error.message} retry={customerIdentities.reload} />}
-      {customerIdentities.state.status === "ready" && <section className="stack">
-        <div><h4>Rekonsiliasi manual per pelanggan</h4><p className="muted">Kolom valid menunjukkan jumlah baris yang bisa langsung diimpor. Buka baris pelanggan untuk melihat transaksi dan exception-nya.</p></div>
-        {customerIdentities.state.data.data.some((identity) => identity.source_sheet.trim().toLowerCase() === "analisa") && <p className="notice-error">Batch ini masih memakai aturan lama dan mencakup sheet Analisa. Unggah ulang file yang sama untuk memperbarui staging; batch hanya akan direset bila belum direview atau dikomit.</p>}
-        {customerIdentities.state.data.data.every((identity) => identity.resolution === "missing_identity") && <p className="muted">Workbook tidak menyediakan identitas yang dapat dicocokkan untuk sheet ini. Baris memerlukan mapping Owner atau tetap dikarantina.</p>}
-        <div className="table-scroll"><table className="import-table import-customer-summary"><thead><tr><th>Pilih</th><th>Sheet pelanggan</th><th>Kode</th><th>Nama pelanggan</th><th>Total baris</th><th>Total debit sumber</th><th>Total kredit sumber</th><th>Net saldo sumber</th><th>Valid untuk diimpor</th><th>Karantina / dikecualikan</th><th>Nominal belum dihitung</th><th>Net baris valid</th><th>Variance pending</th><th>Pencocokan</th><th>Pelanggan tujuan</th><th>Data pelanggan</th></tr></thead><tbody>
-          {customerIdentities.state.data.data.map((identity) => <CustomerIdentityRow key={identity.source_sheet} batchId={id} identity={identity} csrf={csrf} selected={selectedSheets.includes(identity.source_sheet)} selectable={canCommitIdentity(identity)} onSelected={(checked) => toggleCustomer(identity.source_sheet, checked)} onChanged={() => { setRefresh((value) => value + 1); onChanged(); }} />)}
-        </tbody></table></div>
-      </section>}
-      {selectedCustomers.length > 0 && <section className="panel stack" aria-label="Commit pelanggan terpilih">
-        <h4>Commit pelanggan terpilih</h4>
-        <p>{selectedCustomers.length} pelanggan dipilih · {selectedValidRows.toLocaleString("id-ID")} baris valid akan diimpor. Baris valid dari pelanggan lain tetap tersimpan untuk nanti.</p>
-        <dl className="aging-summary variance-explanation">
-          <div><dt>Net sumber yang belum diimpor</dt><dd>{formatRupiah((selectedPendingDebit - selectedPendingCredit).toString())}</dd></div>
-          <div><dt>Net baris valid pilihan ini</dt><dd>{formatRupiah((selectedValidDebit - selectedValidCredit).toString())}</dd></div>
-          <div><dt>Variance terhitung</dt><dd>{selectedUncomputableRows > 0 ? "Belum dapat dihitung" : formatRupiah(selectedKnownVariance.toString())}</dd></div>
-        </dl>
-        <p className="muted">Rumus variance: (debit sumber − kredit sumber) − (debit baris valid − kredit baris valid). Jadi variance bukan saldo/net pelanggan. Jika semua nominal terhitung, sistem mengisi selisihnya otomatis; Owner cukup memastikan angkanya. Variance nonnol tetap memerlukan alasan.</p>
-        {selectedUncomputableRows > 0 && <p className="notice-error">Pelanggan terpilih memiliki {selectedUncomputableRows} baris dengan nominal belum dapat dihitung. Periksa exception di dalam data pelanggan; untuk commit, masukkan variance hasil rekonsiliasi Owner. Jangan menebak.</p>}
-        {varianceRequired && <div className="date-form"><label>Variance IDR (wajib untuk pilihan ini)<Input inputMode="numeric" value={variance} onChange={(event) => setVariance(event.target.value)} placeholder={selectedUncomputableRows > 0 ? "Isi setelah rekonsiliasi Owner" : selectedKnownVariance.toString()} /></label><label>Alasan variance {variance !== "" && variance !== "0" ? "(wajib)" : "(bila ada selisih)"}<Input value={varianceReason} onChange={(event) => setVarianceReason(event.target.value)} maxLength={1000} /></label></div>}
-        <Button onClick={commit} disabled={committing || selectedCustomers.some((identity) => !canCommitIdentity(identity))}>{committing ? "Menyimpan pelanggan terpilih…" : `Commit ${selectedValidRows.toLocaleString("id-ID")} baris valid`}</Button>
-      </section>}
-      {batch.state.data.data.status === "reviewing" && batch.state.data.data.candidate_rows + batch.state.data.data.accepted_rows === 0 && <p className="notice-success">Tidak ada baris valid yang menunggu commit. Semua baris yang dapat dihitung sudah diproses.</p>}
-      {customerIdentities.state.status === "ready" && unresolvedIdentityCount > 0 && <p className="muted">{unresolvedIdentityCount} identitas sheet belum dapat dipastikan. Baris terkait tetap dikarantina kecuali Owner memetakannya manual.</p>}
-    </>}
-    {commitError && <p role="status">{commitError}</p>}
-  </section>;
+      )}
+    </div>
+  );
 }
 
-function CustomerIdentityRow({ identity, batchId, csrf, selected, selectable, onSelected, onChanged }: {
+function CustomerIdentityRow({
+  identity,
+  batchId,
+  csrf,
+  selected,
+  selectable,
+  onSelected,
+  onChanged,
+}: {
   identity: Schema["ImportCustomerIdentityPreview"];
   batchId: string;
   csrf: string;
@@ -195,35 +617,103 @@ function CustomerIdentityRow({ identity, batchId, csrf, selected, selectable, on
 }) {
   const [open, setOpen] = useState(false);
   const exceptionRows = identity.quarantined_rows + identity.excluded_rows;
-  const netValid = BigInt(identity.valid_debit_idr) - BigInt(identity.valid_credit_idr);
   const netSource = BigInt(identity.source_debit_idr) - BigInt(identity.source_credit_idr);
-  const pendingVariance = BigInt(identity.pending_debit_idr) - BigInt(identity.pending_credit_idr) - BigInt(identity.valid_debit_idr) + BigInt(identity.valid_credit_idr);
-  return <>
-    <tr>
-      <td data-label="Pilih"><input type="checkbox" aria-label={`Pilih ${identity.source_name || identity.source_sheet} untuk commit`} checked={selected} disabled={!selectable} onChange={(event) => onSelected(event.target.checked)} /></td>
-      <td data-label="Sheet pelanggan">{identity.source_sheet}</td>
-      <td data-label="Kode">{identity.source_code || "—"}</td>
-      <td data-label="Nama pelanggan"><strong>{identity.source_name || "Nama belum terdeteksi"}</strong></td>
-      <td data-label="Total baris">{identity.source_rows.toLocaleString("id-ID")}</td>
-      <td data-label="Total debit sumber">{formatRupiah(identity.source_debit_idr)}</td>
-      <td data-label="Total kredit sumber">{formatRupiah(identity.source_credit_idr)}</td>
-      <td data-label="Net saldo sumber"><strong>{formatRupiah(netSource.toString())}</strong></td>
-      <td data-label="Valid untuk diimpor"><strong>{identity.valid_rows.toLocaleString("id-ID")}</strong><span className="table-subline">{identity.candidate_rows} kandidat · {identity.accepted_rows} diterima</span></td>
-      <td data-label="Karantina / dikecualikan">{exceptionRows.toLocaleString("id-ID")}<span className="table-subline">{identity.quarantined_rows} karantina · {identity.excluded_rows} dikecualikan</span></td>
-      <td data-label="Nominal belum dihitung">{identity.uncomputable_amount_rows.toLocaleString("id-ID")}</td>
-      <td data-label="Net baris valid"><strong>{formatRupiah(netValid.toString())}</strong><span className="table-subline">debit valid − kredit valid</span></td>
-      <td data-label="Variance pending">{identity.uncomputable_amount_rows > 0 ? <span className="badge">Perlu rekonsiliasi</span> : <strong>{formatRupiah(pendingVariance.toString())}</strong>}<span className="table-subline">sumber belum diimpor − baris valid</span></td>
-      <td data-label="Pencocokan">{customerResolutionLabel(identity.resolution)}{selectable && identity.mapped_valid_rows === identity.valid_rows && !["matched_code", "matched_name", "will_create"].includes(identity.resolution) && <span className="table-subline">Semua baris valid sudah dipetakan</span>}{!selectable && identity.valid_rows > 0 && <span className="table-subline">Mapping seluruh baris valid diperlukan</span>}</td>
-      <td data-label="Pelanggan tujuan">{identity.customer_name || (identity.resolution === "will_create" ? "Dibuat saat commit" : "—")}</td>
-      <td data-label="Data pelanggan"><Button type="button" variant="outline" onClick={() => setOpen(true)}>{identity.valid_rows > 0 ? `Buka ${identity.valid_rows} baris valid` : "Buka review"}</Button></td>
-    </tr>
-    <Dialog open={open} onOpenChange={setOpen} title={`Data pelanggan · ${identity.source_name || identity.source_sheet}`}>
-      <CustomerRowsDialog identity={identity} batchId={batchId} csrf={csrf} onChanged={onChanged} />
-    </Dialog>
-  </>;
+
+  return (
+    <>
+      <tr className="hover:bg-slate-50/70 transition-colors">
+        <td className="p-3 pl-4 text-center">
+          <input
+            type="checkbox"
+            checked={selected}
+            disabled={!selectable}
+            onChange={(e) => onSelected(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-emerald-800 focus:ring-emerald-700"
+          />
+        </td>
+
+        <td className="p-3 font-mono font-medium text-slate-800">{identity.source_sheet}</td>
+
+        <td className="p-3">
+          <div className="font-semibold text-slate-900">{identity.source_name || "Nama Belum Terdeteksi"}</div>
+          {identity.source_code && (
+            <span className="text-[10px] font-mono text-slate-500">Kode: {identity.source_code}</span>
+          )}
+        </td>
+
+        <td className="p-3 text-right font-mono text-slate-700">
+          {formatRupiah(identity.source_debit_idr)}
+        </td>
+
+        <td className="p-3 text-right font-mono text-slate-700">
+          {formatRupiah(identity.source_credit_idr)}
+        </td>
+
+        <td className="p-3 text-right font-mono font-bold text-slate-900">
+          {formatRupiah(netSource.toString())}
+        </td>
+
+        <td className="p-3 text-right font-mono font-bold text-emerald-700">
+          {identity.valid_rows.toLocaleString("id-ID")}
+        </td>
+
+        <td className="p-3 text-right font-mono font-bold text-rose-700">
+          {exceptionRows.toLocaleString("id-ID")}
+        </td>
+
+        <td className="p-3">
+          <Badge
+            variant={
+              identity.resolution === "will_create"
+                ? "info"
+                : identity.resolution.startsWith("matched")
+                ? "success"
+                : "warning"
+            }
+            className="text-[10px]"
+          >
+            {identity.resolution === "will_create"
+              ? "Pelanggan Baru"
+              : identity.resolution === "matched_code"
+              ? "Cocok Kode"
+              : identity.resolution === "matched_name"
+              ? "Cocok Nama"
+              : identity.resolution}
+          </Badge>
+        </td>
+
+        <td className="p-3 pr-4 text-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setOpen(true)}
+            className="h-7 text-xs px-2.5 gap-1"
+          >
+            <span>Buka</span>
+            <ExternalLink className="h-3 w-3 text-slate-400" />
+          </Button>
+        </td>
+      </tr>
+
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`Rincian Sheet: ${identity.source_sheet} (${identity.source_name || "Tanpa Nama"})`}
+        maxWidth="max-w-4xl"
+      >
+        <CustomerRowsDialog identity={identity} batchId={batchId} csrf={csrf} onChanged={onChanged} />
+      </Dialog>
+    </>
+  );
 }
 
-function CustomerRowsDialog({ identity, batchId, csrf, onChanged }: {
+function CustomerRowsDialog({
+  identity,
+  batchId,
+  csrf,
+  onChanged,
+}: {
   identity: Schema["ImportCustomerIdentityPreview"];
   batchId: string;
   csrf: string;
@@ -233,113 +723,299 @@ function CustomerRowsDialog({ identity, batchId, csrf, onChanged }: {
   const [reviewStatus, setReviewStatus] = useState(identity.valid_rows > 0 ? "valid" : "quarantined");
   const [refresh, setRefresh] = useState(0);
   const cursor = cursorStack.at(-1);
-  const loadRows = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/import-batches/{id}/rows", {
-    params: { path: { id: batchId }, query: { ...(cursor ? { cursor } : {}), limit: 50, sheet_name: identity.source_sheet, review_status: reviewStatus || undefined }, signal },
-  })), [batchId, cursor, identity.source_sheet, refresh, reviewStatus]);
+
+  const loadRows = useCallback(
+    async (signal: AbortSignal) =>
+      readResult(
+        await api.GET("/api/v1/import-batches/{id}/rows", {
+          params: {
+            path: { id: batchId },
+            query: {
+              ...(cursor ? { cursor } : {}),
+              limit: 50,
+              sheet_name: identity.source_sheet,
+              review_status: reviewStatus || undefined,
+            },
+          },
+          signal,
+        }),
+      ),
+    [batchId, cursor, identity.source_sheet, refresh, reviewStatus],
+  );
+
   const rows = useResource(loadRows);
-  return <section className="stack customer-row-dialog-list">
-    <div className="import-summary-grid">
-      <SummaryMetric label="Baris valid" value={identity.valid_rows.toLocaleString("id-ID")} />
-      <SummaryMetric label="Karantina" value={identity.quarantined_rows.toLocaleString("id-ID")} />
-      <SummaryMetric label="Dikecualikan" value={identity.excluded_rows.toLocaleString("id-ID")} />
-      <SummaryMetric label="Sudah diimpor" value={identity.committed_rows.toLocaleString("id-ID")} />
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+        <div className="flex items-center gap-3">
+          <span>Valid: <strong className="text-emerald-700">{identity.valid_rows}</strong></span>
+          <span>•</span>
+          <span>Karantina: <strong className="text-rose-700">{identity.quarantined_rows}</strong></span>
+          <span>•</span>
+          <span>Sudah Diimpor: <strong className="text-slate-700">{identity.committed_rows}</strong></span>
+        </div>
+
+        <select
+          value={reviewStatus}
+          onChange={(e) => {
+            setReviewStatus(e.target.value);
+            setCursorStack([]);
+          }}
+          className="h-8 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+        >
+          <option value="">Semua Baris Sheet</option>
+          <option value="valid">Semua Baris Valid</option>
+          <option value="candidate">Kandidat</option>
+          <option value="accepted">Diterima</option>
+          <option value="quarantined">Karantina</option>
+          <option value="excluded">Dikecualikan</option>
+          <option value="committed">Sudah Diimpor</option>
+        </select>
+      </div>
+
+      {rows.state.status === "loading" && (
+        <div className="p-8 text-center text-xs text-slate-500">Memuat baris sheet…</div>
+      )}
+
+      {rows.state.status === "error" && (
+        <ErrorNotice message={rows.state.error.message} retry={rows.reload} />
+      )}
+
+      {rows.state.status === "ready" && rows.state.data.data.length === 0 && (
+        <div className="p-8 text-center text-xs text-slate-500">
+          Tidak ada baris transaksi pada filter ini.
+        </div>
+      )}
+
+      {rows.state.status === "ready" && rows.state.data.data.length > 0 && (
+        <div className="rounded-xl border border-slate-200 overflow-x-auto shadow-2xs">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase text-[10px]">
+              <tr>
+                <th className="p-2.5 pl-4">Baris</th>
+                <th className="p-2.5 text-right">Debit</th>
+                <th className="p-2.5 text-right">Kredit</th>
+                <th className="p-2.5">Status</th>
+                <th className="p-2.5 pr-4 text-center">Tinjau</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {rows.state.data.data.map((row) => (
+                <ImportRowCard
+                  key={row.id}
+                  batchId={batchId}
+                  row={row}
+                  csrf={csrf}
+                  onSaved={() => {
+                    setRefresh((val) => val + 1);
+                    onChanged();
+                  }}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
-    <p className="muted">Baris kandidat dan diterima dapat dipilih untuk commit. Untuk memperbaiki baris bermasalah, tekan <strong>Tinjau</strong>; pilih <strong>Override Owner</strong> hanya jika nilai transaksi dapat diverifikasi dari sumber.</p>
-    <label>Filter baris<select className="input" value={reviewStatus} onChange={(event) => { setReviewStatus(event.target.value); setCursorStack([]); }}>
-      <option value="">Semua baris pelanggan</option><option value="valid">Semua baris valid</option><option value="candidate">Kandidat</option><option value="accepted">Diterima</option><option value="quarantined">Karantina</option><option value="excluded">Dikecualikan</option><option value="committed">Sudah diimpor</option>
-    </select></label>
-    {rows.state.status === "loading" && <p role="status">Memuat baris pelanggan…</p>}
-    {rows.state.status === "error" && <ErrorNotice message={rows.state.error.message} retry={rows.reload} />}
-    {rows.state.status === "ready" && (rows.state.data.data.length === 0 ? <p className="muted">Tidak ada baris pada filter ini.</p> : <div className="table-scroll import-table-wrap"><table className="import-table"><thead><tr><th>Baris sumber</th><th>Pelanggan</th><th>Debit</th><th>Kredit</th><th>Status</th><th>Perlu diperiksa</th><th>Aksi</th></tr></thead><tbody>
-      {rows.state.data.data.map((row) => <ImportRowCard key={row.id} batchId={batchId} row={row} csrf={csrf} onSaved={() => { setRefresh((value) => value + 1); onChanged(); }} />)}
-    </tbody></table></div>)}
-    {rows.state.status === "ready" && (cursorStack.length > 0 || rows.state.data.meta.next_cursor) && <div className="pagination">
-      <Button type="button" variant="outline" disabled={!cursorStack.length} onClick={() => setCursorStack((stack) => stack.slice(0, -1))}>Sebelumnya</Button>
-      <Button type="button" variant="outline" disabled={!rows.state.data.meta.next_cursor} onClick={() => { const next = rows.state.status === "ready" ? rows.state.data.meta.next_cursor : undefined; if (next) setCursorStack((stack) => [...stack, next]); }}>Berikutnya</Button>
-    </div>}
-  </section>;
+  );
 }
 
-function ImportRowCard({ batchId, row, csrf, onSaved }: { batchId: string; row: Schema["ImportRow"]; csrf: string; onSaved: () => void }) {
+function ImportRowCard({
+  batchId,
+  row,
+  csrf,
+  onSaved,
+}: {
+  batchId: string;
+  row: Schema["ImportRow"];
+  csrf: string;
+  onSaved: () => void;
+}) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [action, setAction] = useState<Schema["ImportReviewAction"]>(row.review_status === "quarantined" ? "override" : "accept");
+  const [action, setAction] = useState<Schema["ImportReviewAction"]>(
+    row.review_status === "quarantined" ? "override" : "accept",
+  );
   const [customerId, setCustomerId] = useState(row.mapped_customer_id ?? "");
   const [customerSearch, setCustomerSearch] = useState("");
   const [reason, setReason] = useState("");
   const [note, setNote] = useState(row.review_note ?? "");
-  const [overrideValues, setOverrideValues] = useState(() => Object.fromEntries(OVERRIDE_FIELDS.map(({ key }) => [key, candidateField(row.parsed_values, key)])) as Record<OverrideKey, string>);
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
-  const loadCustomers = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/customers", { params: { query: { search: customerSearch, limit: 25 } }, signal })), [customerSearch]);
+
+  const loadCustomers = useCallback(
+    async (signal: AbortSignal) =>
+      readResult(
+        await api.GET("/api/v1/customers", {
+          params: { query: { search: customerSearch, limit: 25 } },
+          signal,
+        }),
+      ),
+    [customerSearch],
+  );
   const customers = useResource(loadCustomers);
+
   async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setError(undefined); setPending(true);
+    event.preventDefault();
+    setError(undefined);
+    setPending(true);
     try {
-      const overrides = action === "override" ? Object.fromEntries(OVERRIDE_FIELDS.filter(({ key }) => overrideValues[key].trim() !== "").map(({ key }) => [key, overrideValues[key].trim()])) : undefined;
       const result = await api.PATCH("/api/v1/import-batches/{id}/rows/{row_id}", {
         params: { path: { id: batchId, row_id: row.id }, header: { "X-CSRF-Token": csrf } },
-        body: { expected_version: row.version, action, mapped_customer_id: customerId || undefined, overrides, review_note: note || undefined, reason },
+        body: {
+          expected_version: row.version,
+          action,
+          mapped_customer_id: customerId || undefined,
+          review_note: note || undefined,
+          reason,
+        },
       });
-      readResult(result); onSaved();
-    } catch (value) { setError(value instanceof SyntaxError ? "JSON override tidak valid." : failure(value).message); }
-    finally { setPending(false); }
+      readResult(result);
+      setDialogOpen(false);
+      onSaved();
+    } catch (err) {
+      setError(failure(err).message);
+    } finally {
+      setPending(false);
+    }
   }
-  const parsed = asRecord(row.parsed_values);
-  const issueText = Array.isArray(row.issues) && row.issues.length ? row.issues.map(issueLabel).join(" · ") : "Tidak ada issue otomatis";
-  return <>
-    <tr>
-      <td data-label="Baris sumber">{row.sheet_name} · {row.row_number}<span className="table-subline">{String(parsed.effective_date ?? "Tanggal tidak tersedia")}</span></td>
-      <td data-label="Pelanggan">{row.source_customer.name || "Nama belum terdeteksi"}{row.source_customer.code ? <span className="table-subline">Kode {row.source_customer.code}</span> : null}</td>
-      <td data-label="Debit">{displayMoney(parsed.debit_idr)}</td><td data-label="Kredit">{displayMoney(parsed.credit_idr)}</td>
-      <td data-label="Status"><span className="badge">{reviewStatusLabel(row.review_status)}</span></td><td data-label="Perlu diperiksa" className="issue-cell">{issueText}</td>
-      <td data-label="Aksi"><Button variant="outline" onClick={() => setDialogOpen(true)}>Tinjau</Button></td>
-    </tr>
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen} title={`Review ${row.sheet_name} · baris ${row.row_number}`}>
-    <article className="stack">
-    <div className="workspace-heading"><strong>{row.sheet_name} · baris {row.row_number}</strong><span className="badge">{reviewStatusLabel(row.review_status)}</span></div>
-    <p><strong>Perlu diperiksa:</strong> {Array.isArray(row.issues) && row.issues.length ? row.issues.map(issueLabel).join(" · ") : "Tidak ada issue otomatis"}</p>
-    <p className="muted">Pelanggan sumber: {row.source_customer.name || "Nama belum terdeteksi"}{row.source_customer.code ? ` · kode ${row.source_customer.code}` : ""}</p>
-    <details><summary>Lihat nilai sumber dan kandidat</summary>
-      <div className="table-scroll"><table className="source-values-table"><thead><tr><th>Kolom</th><th>Nilai sumber</th><th>Formula</th></tr></thead><tbody>
-        {sourceCells(row.raw_values).map((cell, index) => <tr key={`${cell.column}-${index}`}><td data-label="Kolom">{cell.column}</td><td data-label="Nilai sumber">{displayValue(cell.value)}</td><td data-label="Formula">{cell.formula ? "Ya · nilai sumber diabaikan" : "Tidak"}</td></tr>)}
-      </tbody></table></div>
-      <dl className="aging-summary">{Object.entries(asRecord(row.parsed_values)).map(([key, value]) => <div key={key}><dt>{candidateLabel(key)}</dt><dd>{displayValue(value)}</dd></div>)}</dl>
-    </details>
-    {row.review_status !== "committed" && <form className="stack" onSubmit={save}>
-      <div className="date-form">
-        <label>Aksi review<select className="input" value={action} onChange={(event) => setAction(event.target.value as Schema["ImportReviewAction"])}>
-          <option value="accept">Terima</option><option value="override">Override Owner</option><option value="quarantine">Karantina</option><option value="exclude">Kecualikan</option>
-        </select></label>
-        <label>Cari pelanggan<Input value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="Nama atau kode" /></label>
-        <label>Pelanggan tujuan<select className="input" value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
-          <option value="">Pilih pelanggan</option>{customers.state.status === "ready" && customers.state.data.data.items.map((item) => { const customer = "customer" in item ? item.customer : item; return <option key={customer.id} value={customer.id}>{customer.name}{customer.code ? ` · ${customer.code}` : ""}</option>; })}
-        </select></label>
-      </div>
-      {action === "override" && <fieldset className="stack"><legend>Perbaiki kandidat transaksi</legend><p className="muted">Nominal dimasukkan sebagai rupiah bulat. Formula Excel tidak disalin; isi nilai yang sudah diverifikasi dari sumber.</p><div className="date-form">
-        {OVERRIDE_FIELDS.map((field) => <label key={field.key}>{field.label}<Input type={field.type} inputMode={field.inputMode} pattern={field.pattern} required={field.required} value={overrideValues[field.key]} onChange={(event) => setOverrideValues((current) => ({ ...current, [field.key]: event.target.value }))} /></label>)}
-      </div></fieldset>}
-      <label>Catatan review / usulan split (tetap satu event per baris)<textarea className="input" rows={2} maxLength={1000} value={note} onChange={(event) => setNote(event.target.value)} /></label>
-      <label>Alasan review<Input required maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-      {error && <ErrorNotice message={error} />}
-      <Button type="submit" disabled={pending}>{pending ? "Menyimpan review…" : "Simpan review"}</Button>
-    </form>}
-    </article>
-    </Dialog>
-  </>;
-}
 
-function SummaryMetric({ label, value }: { label: string; value: string }) {
-  return <div className="import-metric"><span>{label}</span><strong>{value}</strong></div>;
+  const parsed = asRecord(row.parsed_values);
+
+  return (
+    <>
+      <tr className="hover:bg-slate-50/70">
+        <td className="p-2.5 pl-4 font-mono text-slate-700">
+          Baris {row.row_number}
+          <span className="block text-[10px] text-slate-400">
+            {String(parsed.effective_date ?? "Tgl belum terdeteksi")}
+          </span>
+        </td>
+
+        <td className="p-2.5 text-right font-mono font-bold text-amber-900">
+          {displayMoney(parsed.debit_idr)}
+        </td>
+
+        <td className="p-2.5 text-right font-mono font-bold text-emerald-800">
+          {displayMoney(parsed.credit_idr)}
+        </td>
+
+        <td className="p-2.5">
+          <Badge
+            variant={
+              row.review_status === "accepted" || row.review_status === "committed"
+                ? "success"
+                : row.review_status === "quarantined"
+                ? "destructive"
+                : "secondary"
+            }
+            className="text-[10px]"
+          >
+            {row.review_status}
+          </Badge>
+        </td>
+
+        <td className="p-2.5 pr-4 text-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogOpen(true)}
+            className="h-6 text-[11px] px-2"
+          >
+            Tinjau
+          </Button>
+        </td>
+      </tr>
+
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        title={`Telaah Baris ${row.row_number} (${row.sheet_name})`}
+      >
+        <form onSubmit={save} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700" htmlFor="row-action">
+              Tindakan Telaah (Action)
+            </label>
+            <select
+              id="row-action"
+              value={action}
+              onChange={(e) => setAction(e.target.value as Schema["ImportReviewAction"])}
+              className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-900"
+            >
+              <option value="accept">Terima (Valid)</option>
+              <option value="quarantine">Karantina (Perlu Ditinjau)</option>
+              <option value="exclude">Kecualikan dari Import</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700" htmlFor="cust-search">
+              Hubungkan ke Pelanggan
+            </label>
+            <Input
+              id="cust-search"
+              value={customerSearch}
+              onChange={(e) => setCustomerSearch(e.target.value)}
+              placeholder="Cari nama atau kode pelanggan tujuan…"
+              className="text-xs"
+            />
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-900 mt-1"
+            >
+              <option value="">-- Tetap Gunakan Pelanggan Sumber --</option>
+              {customers.state.status === "ready" &&
+                customers.state.data.data.items.map((item) => {
+                  const cust = "customer" in item ? item.customer : item;
+                  return (
+                    <option key={cust.id} value={cust.id}>
+                      {cust.name} {cust.code ? `(${cust.code})` : ""}
+                    </option>
+                  );
+                })}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700" htmlFor="row-reason">
+              Alasan Tindakan (Audit) <span className="text-rose-600">*</span>
+            </label>
+            <Input
+              id="row-reason"
+              required
+              maxLength={1000}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="contoh: Nilai telah diverifikasi sesuai nota fisik…"
+              className="text-xs"
+            />
+          </div>
+
+          {error && <ErrorNotice message={error} />}
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} disabled={pending}>
+              Batal
+            </Button>
+            <Button type="submit" size="sm" disabled={pending} className="font-semibold">
+              {pending ? "Menyimpan…" : "Simpan Perubahan"}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </>
+  );
 }
 
 function formatRupiah(value: string): string {
   if (!/^-?\d+$/.test(value)) return `Rp ${value}`;
-  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(BigInt(value));
-}
-
-function subtractMoney(debit: string, credit: string): string {
-  if (!/^\d+$/.test(debit) || !/^\d+$/.test(credit)) return "0";
-  return (BigInt(debit) - BigInt(credit)).toString();
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(BigInt(value));
 }
 
 function displayMoney(value: unknown): string {
@@ -347,67 +1023,8 @@ function displayMoney(value: unknown): string {
   return formatRupiah(String(value));
 }
 
-type OverrideKey = "effective_date" | "reference_no" | "description" | "quantity" | "unit_price_idr" | "debit_idr" | "credit_idr";
-const OVERRIDE_FIELDS: { key: OverrideKey; label: string; type?: string; inputMode?: "text" | "numeric" | "decimal"; pattern?: string; required?: boolean }[] = [
-  { key: "effective_date", label: "Tanggal transaksi", type: "date", required: true },
-  { key: "reference_no", label: "Nomor faktur" },
-  { key: "description", label: "Uraian" },
-  { key: "quantity", label: "Jumlah", inputMode: "decimal", pattern: "[0-9]+([.][0-9]{1,3})?" },
-  { key: "unit_price_idr", label: "Harga satuan (rupiah)", inputMode: "numeric", pattern: "[0-9]+" },
-  { key: "debit_idr", label: "Debit (rupiah)", inputMode: "numeric", pattern: "[0-9]+", required: true },
-  { key: "credit_idr", label: "Kredit (rupiah)", inputMode: "numeric", pattern: "[0-9]+", required: true },
-];
-
-const ISSUE_LABELS: Record<string, string> = {
-  transaction_data_issue: "Perlu tinjauan transaksi",
-  invalid_or_missing_date: "Tanggal kosong atau tidak valid",
-  invalid_amount: "Nominal kosong atau tidak valid",
-  invalid_debit_credit: "Debit/kredit harus memiliki satu nominal positif",
-  future_business_date: "Tanggal berada di masa depan",
-  inherited_previous_date: "Tanggal mengikuti tanggal sebelumnya pada sheet ini",
-  mixed_debit_credit: "Debit dan kredit terisi bersamaan",
-  quantity_price_mismatch: "Jumlah × harga berbeda dari debit",
-  cell_error: "Sel sumber berisi error Excel",
-  formula_customer_identity: "Identitas pelanggan berasal dari formula",
-  customer_identity_unresolved: "Identitas pelanggan belum terselesaikan",
-  formula_value_ignored: "Nilai formula diabaikan",
-  duplicate_source_row: "Baris sumber duplikat",
-  non_transaction_row: "Bukan baris transaksi",
-};
-
-function issueLabel(issue: unknown): string {
-  const code = String(issue);
-  return ISSUE_LABELS[code] ?? code;
-}
-
-function reviewStatusLabel(status: string): string {
-  return ({ candidate: "Kandidat transaksi", accepted: "Diterima", quarantined: "Karantina", excluded: "Dikecualikan", committed: "Sudah diimpor" } as Record<string, string>)[status] ?? status;
-}
-
-function customerResolutionLabel(resolution: string): string {
-  return ({ matched_code: "Cocok berdasarkan kode", matched_name: "Cocok berdasarkan nama", will_create: "Pelanggan baru saat commit", ambiguous: "Ambigu · perlu ditinjau", missing_identity: "Identitas tidak lengkap", formula_identity: "Identitas berisi formula", inactive_match: "Pelanggan nonaktif" } as Record<string, string>)[resolution] ?? resolution;
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function candidateField(candidate: unknown, field: OverrideKey): string {
-  const value = asRecord(candidate)[field];
-  return value === null || value === undefined ? "" : String(value);
-}
-
-function candidateLabel(key: string): string {
-  return ({ effective_date: "Tanggal", reference_no: "Nomor faktur", description: "Uraian", quantity: "Jumlah", unit_price_idr: "Harga satuan", debit_idr: "Debit", credit_idr: "Kredit" } as Record<string, string>)[key] ?? key;
-}
-
-function displayValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === null || value === undefined) return "—";
-  return JSON.stringify(value) ?? String(value);
-}
-
-function sourceCells(value: unknown): { column: string; value: unknown; formula: boolean }[] {
-  if (!Array.isArray(value)) return [];
-  return value.map(asRecord).filter((cell) => typeof cell.column === "string").map((cell) => ({ column: String(cell.column), value: cell.value, formula: cell.formula === true }));
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }

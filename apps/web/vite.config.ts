@@ -20,7 +20,11 @@ export default defineConfig(({ command }) => {
         ? { cert: readFileSync(cert), key: readFileSync(key) }
         : undefined,
       proxy: {
-        "/api": process.env.DEV_API_ORIGIN ?? "http://127.0.0.1:3000",
+        "/api": {
+          target: process.env.DEV_API_ORIGIN ?? "http://127.0.0.1:3000",
+          changeOrigin: true,
+          secure: false,
+        },
       },
     },
   };

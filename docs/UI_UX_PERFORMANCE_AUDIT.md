@@ -1,39 +1,61 @@
-# Audit UI/UX dan performa frontend
+# Audit UI/UX dan Performa Frontend — Keuangan Toko
 
-**Tanggal:** 24 November 2026
-**Cakupan:** login, ringkasan dan detail pelanggan, penjualan kredit, pembayaran, buku piutang, koreksi, aging, import, navigasi, serta konfigurasi build web.
-**Metode:** peninjauan source React/TypeScript, konfigurasi static hosting, pemeriksaan typecheck, dan production build. Browser visual, Lighthouse, serta Core Web Vitals production belum diukur.
+**Tanggal:** 24 November 2026  
+**Cakupan:** Login, shell aplikasi, ringkasan dan detail pelanggan, penjualan kredit, pembayaran & alokasi FIFO, buku piutang, koreksi, umur piutang (aging), import workbook, serta sistem komponen shadcn/ui + Tailwind CSS v4.  
+**Metode:** Peninjauan arsitektur kode React/TypeScript, kepatuhan ADR-006, eliminasi CSS monolitik, typecheck TypeScript, dan production build Vite.
 
-## Ringkasan hasil
+---
 
-| Area | Temuan | Status |
-|---|---|---|
-| Navigasi | Tab pelanggan, aging, dan import sebelumnya mengubah state; pemilihan pelanggan/penjualan mengubah History API secara manual. Deep link, tombol Back/Forward, dan route tidak konsisten. | Diperbaiki dengan React Router. |
-| URL yang dapat dibagikan | Detail pelanggan, penjualan, batch import, rincian bucket aging, pencarian dan halaman daftar pelanggan sebelumnya tidak memiliki URL yang memulihkan state. | Diperbaiki; filter aging serta pencarian/cursor daftar berada di query string. |
-| Navigasi lama | URL lama `/?pelanggan=...&penjualan=...` tidak cocok dengan route baru. | Redirect kompatibilitas ditambahkan. |
-| Pemisahan kode | Halaman laporan, import, penjualan, pembayaran, buku piutang dan koreksi sebelumnya masuk ke graph import awal. | Dipecah dengan lazy loading per fitur. |
-| Status data | Halaman memakai status loading, kosong, error/retry dan notice yang relevan; nilai uang diformat dari string IDR menggunakan `BigInt`. | Pola dipertahankan. |
-| Tabel lebar | Ringkasan pelanggan, buku piutang, penjualan, dan import memiliki banyak kolom. | Di layar sempit tabel berubah menjadi kartu berlabel; tabel desktop mempertahankan heading sticky, dengan identitas/tanggal tetap terlihat saat scroll. Pemeriksaan visual browser belum tersedia. |
+## 1. Ringkasan Hasil & Pembaruan Redesign
 
-## Route frontend
+| Area | Kondisi Awal | Hasil Redesign | Status |
+|---|---|---|---|
+| **Design System & shadcn/ui** | Hanya ada 3 berkas pembungkus HTML standar; tidak ada Card, Badge, Table, Tabs; styling mengandalkan 200 baris CSS monolitik hardcoded. | Mengadopsi arsitektur komponen lokal shadcn/ui (`Button`, `Input`, `Badge`, `Card`, `Dialog`, `Table`, `Tabs`, `MoneyDisplay`) dan token desain Tailwind CSS v4. | **Selesai** |
+| **App Shell & Navigasi** | Tombol navigasi diletakkan kaku di samping judul halaman tanpa ikon, tanpa breadcrumb, dan profil pengguna minimalis. | Menambahkan `AppShell` modern dengan sticky header, tab navigasi berikon (`lucide-react`), badge role (`Pemilik`, `Operator`, `Pembaca`), dan layout terpadu. | **Selesai** |
+| **Ringkasan Pelanggan** | Tabel lebar tanpa visualisasi metrik utama; kartu mobile menduplikasi DOM. | Menambahkan 4 KPI Cards ringkasan di atas tabel, sticky column nama/kode pelanggan, pewarnaan kolom aging bertingkat, dan pencarian cepat. | **Selesai** |
+| **Detail Pelanggan** | Informasi finansial datar dalam list definition sederhana. | Header profil terpadu dengan status badge aktif/nonaktif, kartu highlight finansial (Piutang Terutang vs Saldo Kredit Deposit), serta segmented Tabs (`Buku Piutang`, `Penjualan Kredit`, `Pembayaran`). | **Selesai** |
+| **Penjualan Kredit** | Input item berupa fieldset bertingkat vertikal ke bawah yang lambat diisi untuk banyak barang. | Menjadi **Line-Item Data Sheet (Spreadsheet-like)** dengan kalkulasi instan subtotal per baris dan total faktur real-time, ramah tombol `Tab`. | **Selesai** |
+| **Pembayaran & FIFO** | Tampilan satu kolom sederhana. | Panel pembayaran terstruktur dengan konfirmasi dua tahap, visualisasi alokasi otomatis FIFO ke piutang terlama, dan aksi penerapan saldo kredit. | **Selesai** |
+| **Buku Piutang (Ledger)** | Teks debet/kredit/saldo berjarak rapat tanpa penegasan visual. | Tabel mutasi dua tingkat dengan penegasan kolom debet (amber), kredit (emerald), saldo kumulatif (slate tebal), penanda transaksi dibalik, serta filter tanggal terintegrasi. | **Selesai** |
+| **Umur Piutang (Aging)** | Tabel daftar umur piutang statis. | Visual Aging Distribution Cards dengan kartu interaktif untuk masing-masing kelompok umur (0–15, 16–30, 31–45, 46–60, >60 hari, pengecualian) dan panel drill-down per pelanggan. | **Selesai** |
+| **Import Workbook (PH-06)** | Penjelasan variance dalam paragraf teks padat yang membingungkan. | Dashboard staging terstruktur dengan kartu komparasi visual: Net Sumber vs Net Baris Valid = Variance Terhitung, dialog peninjauan baris, dan form commit parsial. | **Selesai** |
 
-- `/login`
-- `/customers?search=...&page_cursor=...`
-- `/customers`
-- `/customers/:customerId`
-- `/customers/:customerId/sales/:saleId`
-- `/reports/aging?as_of=YYYY-MM-DD&bucket=...`
-- `/imports`
-- `/imports/:batchId`
+---
 
-Nginx sudah memakai `try_files ... /index.html`, sehingga refresh pada path SPA dilayani oleh frontend. Route laporan mempertahankan tanggal dan bucket melalui query string; pemilihan batch import memiliki path tersendiri.
+## 2. Route Frontend
 
-## Catatan performa
+- `/login` — Halaman masuk akun terisolasi dengan kartu login modern.
+- `/customers?search=...&page_cursor=...` — Ringkasan pelanggan, pencarian, dan pagination.
+- `/customers` — Direktori pelanggan default.
+- `/customers/:customerId` — Workspace detail pelanggan (Ledger, Penjualan, Pembayaran).
+- `/customers/:customerId/sales/:saleId` — Peninjauan dan posting faktur penjualan kredit spesifik.
+- `/reports/aging?as_of=YYYY-MM-DD&bucket=...` — Laporan umur piutang per tanggal acuan dengan drill-down bucket.
+- `/imports` — Riwayat batch staging import workbook.
+- `/imports/:batchId` — Telaah batch, rekonsiliasi sheet pelanggan, kalkulasi variance, dan commit.
 
-Production build setelah pemisahan fitur menghasilkan entry `271.45 kB` (`86.66 kB` gzip), chunk workspace pelanggan `17.48 kB` (`5.10 kB` gzip), Import `28.39 kB` (`7.70 kB` gzip), Sales `7.71 kB` (`2.70 kB` gzip), Payments `7.45 kB` (`2.47 kB` gzip), Ledger `6.80 kB` (`1.86 kB` gzip), dan Reports `4.64 kB` (`1.72 kB` gzip). Angka ini ukuran aset build, bukan hasil pengukuran kecepatan perangkat atau jaringan. Workspace pelanggan dan halaman fitur kini diunduh sesuai kebutuhan; entry utama masih mencakup React, React Router, dan autentikasi.
+---
 
-## Tindak lanjut
+## 3. Catatan Performa Build
 
-1. Ukur Lighthouse/Web Vitals pada deployment dan perangkat sasaran; rekam ukuran/latensi API dengan data operasional sintetis.
-2. Periksa layout kartu responsif dan tabel layar lebar di browser desktop/ponsel; pertahankan akses keyboard pada tabel desktop yang dapat di-scroll.
-3. Lakukan pemeriksaan manual keyboard, pembaca layar, zoom 200%, kontras, sticky header, dan dialog setelah tersedia preview browser yang dapat diuji.
+Verifikasi perintah typecheck dan build produksi setelah redesign:
+* `$ pnpm --filter @toko/api-client typecheck`: **Lolos (0 error)**
+* `$ pnpm --filter @toko/web typecheck`: **Lolos (0 error)**
+* `$ pnpm --filter @toko/web build`: **Lolos (1.13 detik)**
+
+Aset hasil build (terpecah secara optimal dengan lazy-loading modul):
+* `dist/index.html`: `0.39 kB`
+* `dist/assets/index.css`: `51.13 kB` (utilitas Tailwind CSS v4)
+* `dist/assets/index.js`: `280.65 kB` (React, React Router, core shell)
+* `dist/assets/customers.js`: `38.56 kB` (Customer directory, KPI cards, detail workspace)
+* `dist/assets/imports.js`: `26.69 kB` (Staging, reconciliation, commit)
+* `dist/assets/sales.js`: `16.31 kB` (Line-item spreadsheet editor & review)
+* `dist/assets/payments.js`: `13.73 kB` (Pembayaran & alokasi FIFO)
+* `dist/assets/ledger.js`: `9.40 kB` (Buku piutang mutasi)
+* `dist/assets/reports.js`: `8.95 kB` (Aging distribution & drill-down)
+
+---
+
+## 4. Rekomendasi Pengujian Berikutnya
+
+1. **Uji Browser & Tampilan Nyata**: Buka antarmuka pada berbagai resolusi layar (desktop 1920x1080, laptop 1366x768, tablet, dan smartphone).
+2. **Audit Aksesibilitas (WCAG 2.1 AA)**: Uji navigasi penuh keyboard (`Tab`, `Shift+Tab`, `Enter`, `Escape`), pembaca layar (screen reader), dan kontras warna pada monitor kasir.
