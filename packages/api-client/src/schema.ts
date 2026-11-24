@@ -48,6 +48,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["change_password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/credit-sales": {
         parameters: {
             query?: never;
@@ -416,22 +432,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/password": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["change_password"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -540,6 +540,10 @@ export interface components {
             payment_id: string;
             reason: string;
         };
+        ChangePassword: {
+            current_password: string;
+            new_password: string;
+        };
         CommitImport: {
             /** Format: int32 */
             expected_version: number;
@@ -586,6 +590,11 @@ export interface components {
             effective_date: string;
             items: components["schemas"]["SaleItemInput"][];
             reference_no?: string | null;
+        };
+        CreateUser: {
+            password: string;
+            role: components["schemas"]["UserRole"];
+            username: string;
         };
         CreditApplicationResponse: {
             data: components["schemas"]["PaymentAllocation"];
@@ -865,6 +874,13 @@ export interface components {
         PageMeta: {
             next_cursor: string | null;
         };
+        PasswordChanged: {
+            changed: boolean;
+        };
+        PasswordChangedResponse: {
+            data: components["schemas"]["PasswordChanged"];
+            meta: components["schemas"]["EmptyMeta"];
+        };
         PaymentAllocation: {
             amount_idr: string;
             /** Format: uuid */
@@ -949,6 +965,9 @@ export interface components {
             /** Format: uuid */
             debit_entry_id: string;
         };
+        ResetUserPassword: {
+            temporary_password: string;
+        };
         ReversalData: {
             /** Format: uuid */
             original_entry_id: string;
@@ -1019,8 +1038,8 @@ export interface components {
             csrf_token: string;
             /** Format: date-time */
             expires_at: string;
-            user: components["schemas"]["CurrentUser"];
             must_change_password: boolean;
+            user: components["schemas"]["CurrentUser"];
         };
         SessionResponse: {
             data: components["schemas"]["SessionDetails"];
@@ -1045,22 +1064,25 @@ export interface components {
             items?: components["schemas"]["SaleItemInput"][] | null;
             reference_no?: string | null;
         };
+        UpdateUser: {
+            is_active: boolean;
+            role: components["schemas"]["UserRole"];
+            username: string;
+        };
         UploadImport: {
             /** Format: binary */
             file: string;
         };
-        /** @enum {string} */
-        UserRole: "owner" | "operator" | "viewer";
         User: {
-            /** Format: uuid */
-            id: string;
-            username: string;
-            role: components["schemas"]["UserRole"];
-            is_active: boolean;
             /** Format: date-time */
             created_at: string;
+            /** Format: uuid */
+            id: string;
+            is_active: boolean;
+            role: components["schemas"]["UserRole"];
             /** Format: date-time */
             updated_at: string;
+            username: string;
         };
         UserListResponse: {
             data: components["schemas"]["User"][];
@@ -1070,30 +1092,8 @@ export interface components {
             data: components["schemas"]["User"];
             meta: components["schemas"]["EmptyMeta"];
         };
-        CreateUser: {
-            username: string;
-            password: string;
-            role: components["schemas"]["UserRole"];
-        };
-        UpdateUser: {
-            username: string;
-            role: components["schemas"]["UserRole"];
-            is_active: boolean;
-        };
-        ResetUserPassword: {
-            temporary_password: string;
-        };
-        ChangePassword: {
-            current_password: string;
-            new_password: string;
-        };
-        PasswordChanged: {
-            changed: boolean;
-        };
-        PasswordChangedResponse: {
-            data: components["schemas"]["PasswordChanged"];
-            meta: components["schemas"]["EmptyMeta"];
-        };
+        /** @enum {string} */
+        UserRole: "owner" | "operator" | "viewer";
     };
     responses: never;
     parameters: never;
@@ -1250,6 +1250,77 @@ export interface operations {
             };
             /** @description Sesi diperlukan */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Kegagalan internal */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    change_password: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePassword"];
+            };
+        };
+        responses: {
+            /** @description Kata sandi diubah */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordChangedResponse"];
+                };
+            };
+            /** @description Permintaan tidak valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Sesi diperlukan atau kata sandi saat ini salah */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Token CSRF tidak valid */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Validasi gagal */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3233,77 +3304,6 @@ export interface operations {
             };
         };
     };
-    change_password: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChangePassword"];
-            };
-        };
-        responses: {
-            /** @description Kata sandi diubah */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PasswordChangedResponse"];
-                };
-            };
-            /** @description Permintaan tidak valid */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Sesi diperlukan atau kata sandi saat ini salah */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Token CSRF tidak valid */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Validasi gagal */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Kegagalan internal */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
     list_users: {
         parameters: {
             query?: never;
@@ -3438,6 +3438,7 @@ export interface operations {
                 "X-CSRF-Token": string;
             };
             path: {
+                /** @description ID pengguna */
                 id: string;
             };
             cookie?: never;
@@ -3516,6 +3517,7 @@ export interface operations {
                 "X-CSRF-Token": string;
             };
             path: {
+                /** @description ID pengguna */
                 id: string;
             };
             cookie?: never;
@@ -3607,6 +3609,7 @@ export interface operations {
                 "X-CSRF-Token": string;
             };
             path: {
+                /** @description ID pengguna */
                 id: string;
             };
             cookie?: never;

@@ -209,6 +209,101 @@
         ]
       }
     },
+    "/api/v1/auth/password": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "change_password",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Kata sandi diubah",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordChangedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Permintaan tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesi diperlukan atau kata sandi saat ini salah",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token CSRF tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validasi gagal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Kegagalan internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/credit-sales": {
       "post": {
         "tags": [
@@ -3001,112 +3096,12 @@
         ]
       }
     },
-    "/api/v1/auth/password": {
-      "post": {
-        "tags": [
-          "users"
-        ],
-        "operationId": "change_password",
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangePassword"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Kata sandi diubah",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PasswordChangedResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Permintaan tidak valid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Sesi diperlukan atau kata sandi saat ini salah",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Token CSRF tidak valid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validasi gagal",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Kegagalan internal",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
     "/api/v1/users": {
       "get": {
         "tags": [
           "users"
         ],
         "operationId": "list_users",
-        "security": [
-          {
-            "session": []
-          }
-        ],
         "responses": {
           "200": {
             "description": "Daftar pengguna",
@@ -3148,27 +3143,37 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
       },
       "post": {
         "tags": [
           "users"
         ],
         "operationId": "create_user",
-        "security": [
+        "parameters": [
           {
-            "session": []
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateUser"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "201": {
@@ -3242,7 +3247,30 @@
             }
           }
         },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "deactivate_user",
         "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "ID pengguna",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "X-CSRF-Token",
             "in": "header",
@@ -3251,29 +3279,119 @@
               "type": "string"
             }
           }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pengguna dinonaktifkan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Permintaan tidak valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sesi diperlukan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Akses ditolak",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pengguna tidak ditemukan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Tidak dapat menonaktifkan pemilik terakhir",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Kegagalan internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
         ]
-      }
-    },
-    "/api/v1/users/{id}": {
+      },
       "patch": {
         "tags": [
           "users"
         ],
         "operationId": "update_user",
-        "security": [
+        "parameters": [
           {
-            "session": []
+            "name": "id",
+            "in": "path",
+            "description": "ID pengguna",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateUser"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -3357,125 +3475,9 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "users"
-        ],
-        "operationId": "deactivate_user",
         "security": [
           {
             "session": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Pengguna dinonaktifkan",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Permintaan tidak valid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Sesi diperlukan",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Akses ditolak",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Pengguna tidak ditemukan",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Tidak dapat menonaktifkan pemilik terakhir",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Kegagalan internal",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
           }
         ]
       }
@@ -3486,20 +3488,35 @@
           "users"
         ],
         "operationId": "reset_user_password",
-        "security": [
+        "parameters": [
           {
-            "session": []
+            "name": "id",
+            "in": "path",
+            "description": "ID pengguna",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ResetUserPassword"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -3583,23 +3600,9 @@
             }
           }
         },
-        "parameters": [
+        "security": [
           {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "X-CSRF-Token",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "session": []
           }
         ]
       }
@@ -3804,6 +3807,21 @@
         },
         "additionalProperties": false
       },
+      "ChangePassword": {
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "properties": {
+          "current_password": {
+            "type": "string"
+          },
+          "new_password": {
+            "type": "string"
+          }
+        }
+      },
       "CommitImport": {
         "type": "object",
         "required": [
@@ -3981,6 +3999,25 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateUser": {
+        "type": "object",
+        "required": [
+          "username",
+          "password",
+          "role"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
       },
       "CreditApplicationResponse": {
         "type": "object",
@@ -4985,6 +5022,32 @@
           }
         }
       },
+      "PasswordChanged": {
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PasswordChangedResponse": {
+        "type": "object",
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PasswordChanged"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/EmptyMeta"
+          }
+        }
+      },
       "PaymentAllocation": {
         "type": "object",
         "required": [
@@ -5279,6 +5342,17 @@
         },
         "additionalProperties": false
       },
+      "ResetUserPassword": {
+        "type": "object",
+        "required": [
+          "temporary_password"
+        ],
+        "properties": {
+          "temporary_password": {
+            "type": "string"
+          }
+        }
+      },
       "ReversalData": {
         "type": "object",
         "required": [
@@ -5517,7 +5591,6 @@
           "user",
           "expires_at",
           "csrf_token",
-          "must_change_password",
           "must_change_password"
         ],
         "properties": {
@@ -5528,11 +5601,11 @@
             "type": "string",
             "format": "date-time"
           },
-          "user": {
-            "$ref": "#/components/schemas/CurrentUser"
-          },
           "must_change_password": {
             "type": "boolean"
+          },
+          "user": {
+            "$ref": "#/components/schemas/CurrentUser"
           }
         }
       },
@@ -5629,6 +5702,25 @@
         },
         "additionalProperties": false
       },
+      "UpdateUser": {
+        "type": "object",
+        "required": [
+          "username",
+          "role",
+          "is_active"
+        ],
+        "properties": {
+          "is_active": {
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "UploadImport": {
         "type": "object",
         "required": [
@@ -5641,14 +5733,6 @@
           }
         }
       },
-      "UserRole": {
-        "type": "string",
-        "enum": [
-          "owner",
-          "operator",
-          "viewer"
-        ]
-      },
       "User": {
         "type": "object",
         "required": [
@@ -5660,26 +5744,26 @@
           "updated_at"
         ],
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "username": {
-            "type": "string"
-          },
-          "role": {
-            "$ref": "#/components/schemas/UserRole"
-          },
-          "is_active": {
-            "type": "boolean"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time"
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "username": {
+            "type": "string"
           }
         }
       },
@@ -5716,95 +5800,13 @@
           }
         }
       },
-      "CreateUser": {
-        "type": "object",
-        "required": [
-          "username",
-          "password",
-          "role"
-        ],
-        "properties": {
-          "username": {
-            "type": "string"
-          },
-          "password": {
-            "type": "string"
-          },
-          "role": {
-            "$ref": "#/components/schemas/UserRole"
-          }
-        }
-      },
-      "UpdateUser": {
-        "type": "object",
-        "required": [
-          "username",
-          "role",
-          "is_active"
-        ],
-        "properties": {
-          "username": {
-            "type": "string"
-          },
-          "role": {
-            "$ref": "#/components/schemas/UserRole"
-          },
-          "is_active": {
-            "type": "boolean"
-          }
-        }
-      },
-      "ResetUserPassword": {
-        "type": "object",
-        "required": [
-          "temporary_password"
-        ],
-        "properties": {
-          "temporary_password": {
-            "type": "string"
-          }
-        }
-      },
-      "ChangePassword": {
-        "type": "object",
-        "required": [
-          "current_password",
-          "new_password"
-        ],
-        "properties": {
-          "current_password": {
-            "type": "string"
-          },
-          "new_password": {
-            "type": "string"
-          }
-        }
-      },
-      "PasswordChanged": {
-        "type": "object",
-        "required": [
-          "changed"
-        ],
-        "properties": {
-          "changed": {
-            "type": "boolean"
-          }
-        }
-      },
-      "PasswordChangedResponse": {
-        "type": "object",
-        "required": [
-          "data",
-          "meta"
-        ],
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PasswordChanged"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/EmptyMeta"
-          }
-        }
+      "UserRole": {
+        "type": "string",
+        "enum": [
+          "owner",
+          "operator",
+          "viewer"
+        ]
       }
     },
     "securitySchemes": {
