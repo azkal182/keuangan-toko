@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::{ApiError, EmptyMeta};
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     Owner,
@@ -31,6 +31,7 @@ pub struct SessionDetails {
     pub user: CurrentUser,
     pub expires_at: DateTime<Utc>,
     pub csrf_token: String,
+    pub must_change_password: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

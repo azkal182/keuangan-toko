@@ -32,6 +32,8 @@
 - `/reports/aging?as_of=YYYY-MM-DD&bucket=...` — Laporan umur piutang per tanggal acuan dengan drill-down bucket.
 - `/imports` — Riwayat batch staging import workbook.
 - `/imports/:batchId` — Telaah batch, rekonsiliasi sheet pelanggan, kalkulasi variance, dan commit.
+- `/settings/users` — Manajemen akun oleh Owner.
+- `/settings/account` — Penggantian kata sandi akun yang sedang masuk; juga menjadi satu-satunya halaman aplikasi yang dapat digunakan sampai kata sandi sementara diganti.
 
 ---
 

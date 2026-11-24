@@ -4,6 +4,7 @@ pub mod imports;
 pub mod reports;
 pub mod sales;
 pub mod transactions;
+pub mod users;
 
 use auth::SessionSecurity;
 use std::collections::BTreeMap;
@@ -39,6 +40,7 @@ pub struct PageMeta {
 #[openapi(
     info(title = "Keuangan Toko API", version = "1"),
     paths(auth::get_me, auth::login, auth::logout,
+          users::change_password,
           customers::list_customers, customers::create_customer, customers::get_customer,
           customers::update_customer, customers::merge_customer, customers::list_ledger,
           sales::create_sale, sales::update_sale, sales::post_sale, sales::get_sale,
@@ -48,12 +50,17 @@ pub struct PageMeta {
           imports::upload_import, imports::list_imports, imports::get_import,
           imports::list_import_rows, imports::list_import_customer_identities,
           imports::prepare_import_customer_identities,
-          imports::review_import_row, imports::commit_import),
+          imports::review_import_row, imports::commit_import,
+          users::list_users, users::create_user, users::update_user, users::deactivate_user,
+          users::change_password, users::reset_user_password),
     modifiers(&SessionSecurity),
     components(schemas(
         ApiError, ErrorDetails, EmptyMeta, PageMeta,
         auth::CurrentUser, auth::SessionDetails, auth::SessionResponse, auth::UserRole,
         auth::LoginRequest, auth::LogoutData, auth::LogoutResponse,
+        users::User, users::UserListResponse, users::UserResponse,
+        users::CreateUser, users::UpdateUser, users::ResetUserPassword,
+        users::ChangePassword, users::PasswordChanged, users::PasswordChangedResponse,
         customers::Customer, customers::CustomerDetail, customers::CustomerList,
         customers::ListCustomersQuery, customers::CreateCustomer, customers::UpdateCustomer,
         customers::MergeCustomer, customers::LedgerQuery, customers::LedgerEntry,
@@ -75,8 +82,8 @@ pub struct PageMeta {
         imports::PrepareImportCustomerIdentitiesResponse,
         imports::ImportRowsQuery,
         imports::ImportRowsResponse, imports::ReviewImportRow, imports::ImportReviewResponse,
-        imports::CommitImport, imports::ImportCommitData, imports::ImportCommitResponse
-        , imports::UploadImport
+        imports::CommitImport, imports::ImportCommitData, imports::ImportCommitResponse,
+        imports::UploadImport
     ))
 )]
 pub struct ApiDoc;

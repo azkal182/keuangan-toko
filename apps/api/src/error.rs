@@ -140,7 +140,7 @@ impl<S: Send + Sync> FromRequestParts<S> for RouteId {
                 id.error(
                     StatusCode::BAD_REQUEST,
                     "INVALID_ID",
-                    "ID pelanggan tidak valid",
+                    "ID pada jalur tidak valid",
                 )
             })
     }

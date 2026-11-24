@@ -51,16 +51,18 @@ struct SessionRow {
     role: String,
     expires_at: DateTime<Utc>,
     needs_refresh: bool,
+    must_change_password: bool,
 }
 
 #[derive(Clone)]
 pub struct Session {
     pub user_id: Uuid,
-    session_id: Uuid,
+    pub(crate) session_id: Uuid,
     pub role: Role,
     username: String,
     expires_at: DateTime<Utc>,
     csrf_token: String,
+    pub must_change_password: bool,
 }
 
 pub async fn request_context(mut request: Request, next: Next) -> Response {
@@ -83,8 +85,22 @@ pub async fn require_access(
     mut request: Request,
     next: Next,
 ) -> Response {
+    let path = request.uri().path();
     match authenticate(&policy, request.headers(), request.method(), request_id).await {
         Ok(session) => {
+            if session.must_change_password
+                && !((request.method().as_str() == "GET" && path == "/api/v1/auth/me")
+                    || (request.method().as_str() == "POST" && path == "/api/v1/auth/logout")
+                    || (request.method().as_str() == "POST" && path == "/api/v1/auth/password"))
+            {
+                return request_id
+                    .error(
+                        StatusCode::FORBIDDEN,
+                        "PASSWORD_CHANGE_REQUIRED",
+                        "Ganti kata sandi sebelum menggunakan aplikasi",
+                    )
+                    .into_response();
+            }
             request.extensions_mut().insert(session);
             next.run(request).await
         }
@@ -101,7 +117,7 @@ async fn authenticate(
     let token = session_cookie(headers).ok_or_else(|| unauthenticated(request))?;
     let token_hash = Sha256::digest(token.as_bytes());
     let row: SessionRow = sqlx::query_as(
-        "SELECT u.id, u.username, u.role, s.expires_at, s.id AS session_id,
+        "SELECT u.id, u.username, u.role, u.must_change_password, s.expires_at, s.id AS session_id,
                 s.last_seen_at <= statement_timestamp() - interval '1 minute' AS needs_refresh
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND u.is_active
@@ -150,6 +166,7 @@ async fn authenticate(
         role,
         expires_at: row.expires_at,
         csrf_token,
+        must_change_password: row.must_change_password,
     })
 }
 
@@ -208,6 +225,7 @@ fn session_response(session: Session) -> SessionResponse {
             },
             expires_at: session.expires_at,
             csrf_token: session.csrf_token,
+            must_change_password: session.must_change_password,
         },
         meta: EmptyMeta::default(),
     }
@@ -290,6 +308,7 @@ struct Account {
     password_hash: String,
     role: String,
     is_active: bool,
+    must_change_password: bool,
 }
 
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
@@ -314,7 +333,7 @@ pub async fn login(
         return Err(forbidden(request));
     }
     let username = input.username.trim();
-    if username.is_empty() || username.len() > 128 || username.contains(' ') {
+    if username.is_empty() || username.len() > 128 || username.contains('\0') {
         return Err(request.invalid("username", "Nama pengguna tidak valid"));
     }
     if input.password.is_empty() || input.password.len() > 1024 {
@@ -327,7 +346,7 @@ pub async fn login(
         .try_acquire_owned()
         .map_err(|_| rate_limited(request))?;
     let account: Option<Account> = sqlx::query_as(
-        "SELECT id, username, password_hash, role, is_active FROM users WHERE username = $1",
+        "SELECT id, username, password_hash, role, is_active, must_change_password FROM users WHERE username = $1",
     )
     .bind(username)
     .fetch_optional(&state.pool)
@@ -417,6 +436,7 @@ pub async fn login(
             username: account.username,
             expires_at,
             csrf_token: csrf_token(&token),
+            must_change_password: account.must_change_password,
         })),
     ))
 }
