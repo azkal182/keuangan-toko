@@ -22,9 +22,11 @@ function unpackCustomer(value: CustomerSummary | Schema["Customer"]) {
     customer: value.customer,
     outstanding: value.outstanding_idr,
     credit: value.customer_credit_idr,
+    aging: [value.days_0_15_idr, value.days_16_30_idr, value.days_31_45_idr, value.days_46_60_idr, value.days_over_60_idr],
+    exceptions: BigInt(value.unknown_date_idr) + BigInt(value.future_date_idr),
   };
   // Older API processes return Customer directly. Keep the UI alive during a rolling restart.
-  return { customer: value, outstanding: undefined, credit: undefined };
+  return { customer: value, outstanding: undefined, credit: undefined, aging: undefined, exceptions: undefined };
 }
 
 export function CustomerWorkspace({ session, onLogout }: {
@@ -161,7 +163,7 @@ function CustomerList({ onSelect, revision }: {
   const { state, reload } = useResource(load);
   return (
     <section className="panel customer-list stack" aria-label="Daftar pelanggan">
-      <div><h2>Ringkasan pelanggan</h2><p className="muted">Pilih nama pelanggan untuk membuka buku piutang dan riwayat transaksinya.</p></div>
+      <div><h2>Ringkasan pelanggan</h2><p className="muted">Jumlah adalah total piutang terbuka. Bucket memakai umur kalender Asia/Jakarta; nominal bertanggal tidak diketahui atau masa depan ditampilkan di kolom peninjauan.</p></div>
       <form className="search-form" onSubmit={(event) => {
         event.preventDefault();
         setQuery({ search: search.trim(), cursors: [] });
@@ -176,12 +178,12 @@ function CustomerList({ onSelect, revision }: {
         <>
           {state.data.data.items.length === 0 ? <p className="muted">Tidak ada pelanggan yang ditemukan.</p> : (
             <div className="table-scroll" tabIndex={0} role="region" aria-label="Ringkasan saldo pelanggan">
-              <table className="customer-summary-table"><thead><tr><th scope="col">Pelanggan</th><th scope="col" className="number">Piutang</th><th scope="col" className="number">Saldo kredit</th></tr></thead>
+              <table className="customer-summary-table"><thead><tr><th scope="col">Pelanggan</th><th scope="col" className="number">Jumlah</th><th scope="col" className="number">0–15 Hari</th><th scope="col" className="number">16–30 Hari</th><th scope="col" className="number">31–45 Hari</th><th scope="col" className="number">46–60 Hari</th><th scope="col" className="number">Lebih dari 60 Hari</th><th scope="col" className="number">Tanggal perlu ditinjau</th></tr></thead>
                 <tbody>{state.data.data.items.map((item) => {
-                  const { customer, outstanding, credit } = unpackCustomer(item as CustomerSummary | Schema["Customer"]);
+                  const { customer, outstanding, aging, exceptions } = unpackCustomer(item as CustomerSummary | Schema["Customer"]);
                   return <tr key={customer.id}>
                     <td><button type="button" className="customer-summary-link" onClick={() => onSelect(customer.id)}><strong>{customer.name}</strong><span className="table-note">{customer.code ?? "Tanpa kode"} {!customer.is_active && " · Nonaktif"}</span></button></td>
-                    <td className="number">{outstanding === undefined ? "—" : formatRupiah(outstanding)}</td><td className="number">{credit === undefined ? "—" : formatRupiah(credit)}</td>
+                    <td className="number">{outstanding === undefined ? "—" : formatRupiah(outstanding)}</td>{aging?.map((amount, index) => <td className="number" key={index}>{formatRupiah(amount)}</td>)}{aging && <td className="number" title="Jumlah piutang dengan tanggal tidak diketahui atau tanggal masa depan">{formatRupiah(exceptions!.toString())}</td>}
                   </tr>;
                 })}</tbody>
               </table>

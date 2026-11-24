@@ -18,10 +18,6 @@ const entryLabels: Record<string, string> = {
   reversal: "Pembalikan",
 };
 
-const allocationLabels: Record<string, string> = {
-  allocated: "Teralokasi penuh", partially_allocated: "Teralokasi sebagian", unallocated: "Belum teralokasi",
-};
-
 export function Ledger({ id, openSale, csrf, owner, onChanged }: {
   id: string; openSale: (id: string) => void; csrf: string; owner: boolean; onChanged: () => void;
 }) {
@@ -57,34 +53,28 @@ export function Ledger({ id, openSale, csrf, owner, onChanged }: {
               <table>
                 <caption className="sr-only">Riwayat transaksi buku piutang</caption>
                 <thead>
-                  <tr>
-                    <th scope="col">Tanggal</th>
-                    <th scope="col">Transaksi</th>
-                    <th scope="col" className="number">Debit</th>
-                    <th scope="col" className="number">Kredit</th>
-                    <th scope="col" className="number">Saldo berjalan</th>
-                    <th scope="col">Alokasi</th>
-                  </tr>
+                  <tr><th scope="col" rowSpan={2}>Tanggal</th><th scope="col" rowSpan={2}>Uraian</th><th scope="col" rowSpan={2} className="number">Jumlah</th><th scope="col" rowSpan={2} className="number">Harga</th><th scope="col" rowSpan={2} className="number">Debet</th><th scope="col" rowSpan={2} className="number">Kredit</th><th scope="col" rowSpan={2} className="number">Saldo</th><th scope="colgroup" colSpan={3}>Keterangan</th></tr>
+                  <tr><th scope="col" className="number">Lunas</th><th scope="col" className="number">Sisa</th><th scope="col" className="number">Umur Piutang</th></tr>
                 </thead>
                 <tbody>
                   {state.data.data.entries.map((entry) => (
                     <tr key={entry.id}>
                       <td>{entry.effective_date ? businessDate.format(new Date(entry.effective_date)) : "Tidak diketahui"}</td>
                       <td>
-                        {entry.entry_type === "credit_sale" ? (
-                          <button type="button" className="sale-link" onClick={() => openSale(entry.source_id)}>Lihat penjualan kredit</button>
-                        ) : <strong>{entryLabels[entry.entry_type] ?? entry.entry_type}</strong>}
-                        {entry.reference && <span className="table-note">{entry.reference}</span>}
-                        {entry.description && <span className="table-note">{entry.description}</span>}
+                        {entry.entry_type === "credit_sale" && entry.description ? <button type="button" className="sale-link" onClick={() => openSale(entry.source_id)}>{entry.description}</button> : <strong>{entry.description ?? entryLabels[entry.entry_type] ?? entry.entry_type}</strong>}
                         {owner && entry.entry_type.startsWith("legacy_") && !entry.is_reversed && <div className="stack">
                           {entry.entry_type === "legacy_payment" && BigInt(entry.credit_idr) > BigInt(entry.allocated_idr) && <LegacyCreditApplication customerId={id} paymentSourceId={entry.source_id} availableAmount={(BigInt(entry.credit_idr) - BigInt(entry.allocated_idr)).toString()} csrf={csrf} onChanged={() => { reload(); onChanged(); }} />}
                           <ReverseTransactionAction id={entry.id} csrf={csrf} onChanged={() => { reload(); onChanged(); }} />
                         </div>}
                       </td>
+                      <td className="number">{entry.quantity ?? "—"}</td>
+                      <td className="number">{entry.unit_price_idr == null ? "—" : formatRupiah(entry.unit_price_idr)}</td>
                       <td className="number">{entry.debit_idr === "0" ? "—" : formatRupiah(entry.debit_idr)}</td>
                       <td className="number">{entry.credit_idr === "0" ? "—" : formatRupiah(entry.credit_idr)}</td>
                       <td className="number">{formatRupiah(entry.running_balance_idr)}</td>
-                      <td>{entry.allocation_status ? allocationLabels[entry.allocation_status] ?? entry.allocation_status : "—"}</td>
+                      <td className="number">{BigInt(entry.debit_idr) === 0n ? "—" : formatRupiah(entry.allocated_idr)}</td>
+                      <td className="number">{BigInt(entry.debit_idr) === 0n ? "—" : formatRupiah(entry.remaining_idr)}</td>
+                      <td className="number">{entry.age_days == null ? (entry.debit_idr === "0" ? "—" : "Tanggal tidak diketahui") : entry.age_days < 0 ? "Tanggal masa depan" : `${entry.age_days} hari`}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{Body, Failure, Params, RequestId, RouteId},
-    ledger,
+    ledger, reports,
 };
 
 #[derive(sqlx::FromRow)]
@@ -94,21 +94,46 @@ pub async fn list(
     .await
     .map_err(|_| request.internal())?;
     let next_cursor = trim_page(&mut customers, limit, |customer| customer.id);
+    let customer_ids: Vec<Uuid> = customers.iter().map(|customer| customer.id).collect();
+    let as_of: chrono::NaiveDate =
+        sqlx::query_scalar("SELECT (now() AT TIME ZONE 'Asia/Jakarta')::date")
+            .fetch_one(&pool)
+            .await
+            .map_err(|_| request.internal())?;
+    let debits = reports::open_debits(&pool, Some(&customer_ids), request).await?;
+    let mut aging = std::collections::HashMap::<Uuid, [i64; 7]>::new();
+    for debit in debits {
+        let buckets = aging.entry(debit.customer_id).or_insert([0; 7]);
+        let index = reports::bucket(debit.effective_date, as_of);
+        buckets[index] = buckets[index]
+            .checked_add(debit.open_idr)
+            .ok_or_else(|| request.internal())?;
+    }
     Ok(Json(CustomerListResponse {
         data: CustomerList {
             items: customers
                 .into_iter()
-                .map(|row| CustomerSummary {
-                    customer: Customer {
-                        id: row.id,
-                        code: row.code,
-                        name: row.name,
-                        address: row.address,
-                        is_active: row.is_active,
-                        version: row.version,
-                    },
-                    outstanding_idr: row.outstanding_idr,
-                    customer_credit_idr: row.customer_credit_idr,
+                .map(|row| {
+                    let amounts = aging.get(&row.id).copied().unwrap_or([0; 7]);
+                    CustomerSummary {
+                        customer: Customer {
+                            id: row.id,
+                            code: row.code,
+                            name: row.name,
+                            address: row.address,
+                            is_active: row.is_active,
+                            version: row.version,
+                        },
+                        outstanding_idr: row.outstanding_idr,
+                        customer_credit_idr: row.customer_credit_idr,
+                        days_0_15_idr: amounts[0].to_string(),
+                        days_16_30_idr: amounts[1].to_string(),
+                        days_31_45_idr: amounts[2].to_string(),
+                        days_46_60_idr: amounts[3].to_string(),
+                        days_over_60_idr: amounts[4].to_string(),
+                        unknown_date_idr: amounts[5].to_string(),
+                        future_date_idr: amounts[6].to_string(),
+                    }
                 })
                 .collect(),
         },

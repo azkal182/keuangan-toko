@@ -78,6 +78,9 @@ struct PreparedImportEntry {
     debit: i64,
     credit: i64,
     source_order: i64,
+    description: Option<String>,
+    quantity: Option<String>,
+    unit_price_idr: Option<i64>,
 }
 
 struct PreparedLegacyAllocation {
@@ -1321,11 +1324,27 @@ pub async fn commit_batch(
             debit,
             credit,
             source_order: *source_order,
+            description: values
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            quantity: values
+                .get("quantity")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            unit_price_idr: values
+                .get("unit_price_idr")
+                .and_then(Value::as_str)
+                .and_then(|value| parse_signed_money_value(value).ok()),
         });
     }
     for chunk in committed.chunks(250) {
         let mut query = QueryBuilder::<Postgres>::new(
-            "INSERT INTO receivable_entries(id,customer_id,entry_type,source_id,effective_date,debit_idr,credit_idr,source_order,created_by) ",
+            "INSERT INTO receivable_entries(id,customer_id,entry_type,source_id,effective_date,debit_idr,credit_idr,source_order,created_by,description,quantity,unit_price_idr) ",
         );
         query.push_values(chunk, |mut row, entry| {
             row.push_bind(entry.ledger_id)
@@ -1340,7 +1359,10 @@ pub async fn commit_batch(
                 .push_bind(entry.debit)
                 .push_bind(entry.credit)
                 .push_bind(entry.source_order)
-                .push_bind(session.user_id);
+                .push_bind(session.user_id)
+                .push_bind(&entry.description)
+                .push_bind(&entry.quantity)
+                .push_bind(entry.unit_price_idr);
         });
         query
             .build()
