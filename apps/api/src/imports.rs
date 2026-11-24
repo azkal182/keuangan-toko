@@ -16,6 +16,19 @@ use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 use toko_contracts::{EmptyMeta, PageMeta, imports::*};
 use toko_domain::customer::{CustomerIdentity, fold_customer_code, fold_customer_name};
 use uuid::Uuid;
+
+type ImportCustomerMatchRow = (Uuid, Option<String>, Option<String>, String, bool);
+type ImportReviewRow = (i32, Value, Option<Value>, String, String, String, Value);
+type ImportCommitRow = (
+    Uuid,
+    Option<Uuid>,
+    Value,
+    String,
+    String,
+    i64,
+    String,
+    Value,
+);
 use zip::ZipArchive;
 
 use crate::{
@@ -371,7 +384,7 @@ pub async fn list_customer_identities(
     .fetch_all(&pool)
     .await
     .map_err(|_| request.internal())?;
-    let customers: Vec<(Uuid, Option<String>, Option<String>, String, bool)> =
+    let customers: Vec<ImportCustomerMatchRow> =
         sqlx::query_as("SELECT id,code,normalized_code,name,is_active FROM customers ORDER BY id")
             .fetch_all(&pool)
             .await
@@ -986,7 +999,7 @@ pub async fn review_row(
         ImportReviewAction::Override => "accepted",
     };
     let mut tx = pool.begin().await.map_err(|_| request.internal())?;
-    let current:Option<(i32,Value,Option<Value>,String,String,String,Value)>=sqlx::query_as("SELECT version,issues,parsed_values,source_fingerprint,review_status,sheet_name,source_customer FROM import_rows WHERE id=$1 AND batch_id=$2 FOR UPDATE").bind(row_id).bind(batch).fetch_optional(&mut *tx).await.map_err(|_|request.internal())?;
+    let current: Option<ImportReviewRow> = sqlx::query_as("SELECT version,issues,parsed_values,source_fingerprint,review_status,sheet_name,source_customer FROM import_rows WHERE id=$1 AND batch_id=$2 FOR UPDATE").bind(row_id).bind(batch).fetch_optional(&mut *tx).await.map_err(|_|request.internal())?;
     let (version, issues, parsed, fingerprint, old_status, source_sheet, source) =
         current.ok_or_else(|| not_found(request))?;
     if version != input.expected_version {
@@ -1137,7 +1150,7 @@ pub async fn commit_batch(
             "Batch berubah sejak preview dimuat",
         ));
     }
-    let rows:Vec<(Uuid,Option<Uuid>,Value,String,String,i64,String,Value)>=sqlx::query_as("SELECT id,mapped_customer_id,parsed_values,source_fingerprint,review_status,source_order,sheet_name,source_customer FROM import_rows WHERE batch_id=$1 AND id=ANY($2) ORDER BY source_order FOR UPDATE")
+    let rows: Vec<ImportCommitRow> = sqlx::query_as("SELECT id,mapped_customer_id,parsed_values,source_fingerprint,review_status,source_order,sheet_name,source_customer FROM import_rows WHERE batch_id=$1 AND id=ANY($2) ORDER BY source_order FOR UPDATE")
         .bind(batch).bind(&input.row_ids).fetch_all(&mut *tx).await.map_err(|error|commit_db_failure(request,"lock_import_rows",error))?;
     if rows.len() != input.row_ids.len()
         || rows
@@ -1616,7 +1629,7 @@ fn parse_workbook(bytes: &[u8], business_today: chrono::NaiveDate) -> Result<Vec
                 return Err(());
             }
             let absolute_row = row_start + u32::try_from(offset).map_err(|_| ())?;
-            if absolute_row + 1 <= 6 {
+            if absolute_row < 6 {
                 continue;
             }
             let mut raw = Vec::new();
@@ -1707,7 +1720,7 @@ fn parse_workbook(bytes: &[u8], business_today: chrono::NaiveDate) -> Result<Vec
                     calculated_debit()
                 }
             } else if values[5].is_null() {
-                calculated_debit().or_else(|| Some(0))
+                calculated_debit().or(Some(0))
             } else {
                 parse_integer(&values[5])
             };

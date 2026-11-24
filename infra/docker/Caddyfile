@@ -1,0 +1,4 @@
+piutang.banza.web.id {
+    encode zstd gzip
+    reverse_proxy web:80
+}

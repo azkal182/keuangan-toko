@@ -14,6 +14,8 @@ Tidak ada hardcoded production secret, credential, URL, atau data pelanggan dala
 - API Axum dan web React dibuat sebagai OCI containers pada Linux. Target hosting region Indonesia bila tersedia; PostgreSQL terkelola pada region yang sama diutamakan.
 - Vendor deployment dipilih pada PH-08 setelah pembandingan biaya, data residency, backup dan restore; desain aplikasi tidak bergantung pada API proprietary provider.
 - Deployment memiliki staging dan production terpisah, migration review, health/readiness checks, canary atau staged rollout untuk perubahan berisiko dan rollback artefak versi sebelumnya.
+
+Draft Docker Compose dan GitHub Actions untuk VPS Ubuntu 24 di `piutang.banza.web.id` dijelaskan di [`infra/docker/DEPLOYMENT.md`](../infra/docker/DEPLOYMENT.md). Berkas tersebut belum dijalankan pada VPS. Backup otomatis, restore drill, purge data import, secret deployment GitHub, dan verifikasi setelah deploy masih menjadi pekerjaan PH-08.
 ## Perintah pengembangan lokal
 
 Toolchain repo dikunci ke Rust 1.100.0, Node.js 26.13.1 (LTS), dan pnpm 12.21.0. Jalankan perintah dari root workspace.
