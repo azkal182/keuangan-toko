@@ -136,7 +136,13 @@ jobs:
           DEPLOY_SHA: ${{ github.sha }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         run: |
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'docker logout ghcr.io >/dev/null 2>&1 || true'
           printf '%s' "$GHCR_READ_TOKEN" | ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            'docker login ghcr.io -u azkal182 --password-stdin'
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd /opt/keuangan-toko && IMAGE_TAG=$DEPLOY_SHA docker compose pull && IMAGE_TAG=$DEPLOY_SHA docker compose run --rm migrate && IMAGE_TAG=$DEPLOY_SHA docker compose up -d --remove-orphans"
+            "set -eu
+            export DOCKER_CONFIG=\$(mktemp -d)
+            trap 'rm -rf \"\$DOCKER_CONFIG\"' EXIT
+            docker login ghcr.io -u azkal182 --password-stdin
+            cd /opt/keuangan-toko
+            IMAGE_TAG=sha-$DEPLOY_SHA docker compose pull
+            IMAGE_TAG=sha-$DEPLOY_SHA docker compose run --rm migrate
+            IMAGE_TAG=sha-$DEPLOY_SHA docker compose up -d --remove-orphans"
