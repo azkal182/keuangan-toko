@@ -17,14 +17,15 @@
 
 | ID | Method dan path | Izin | Request / hasil |
 |---|---|---|---|
-| API-001 | `POST /api/v1/auth/login` | publik, rate-limited | `username`, `password`; set cookie sesi, response user, role dan `csrf_token`. |
+| API-001 | `POST /api/v1/auth/login` | publik, rate-limited | `username`, `password`; set cookie sesi, response user, role, `must_change_password`, dan `csrf_token`. |
 | API-002 | `POST /api/v1/auth/logout` | login | revoke sesi; response `data: {"logged_out":true}`. |
-| API-003 | `GET /api/v1/auth/me` | login | user aktif, role, expiry sesi dan `csrf_token` untuk mutasi berikutnya. |
-| API-004 | `POST /api/v1/auth/password` | login | `current_password`, `new_password`; revoke sesi lain. |
-| API-005 | `GET /api/v1/users` | `users:manage` | daftar akun, cursor. |
-| API-006 | `POST /api/v1/users` | `users:manage` | `username`, `role`, `temporary_password`; user harus mengganti password pada login pertama. |
-| API-007 | `PATCH /api/v1/users/{id}` | `users:manage` | ubah role/aktif; tidak boleh menonaktifkan Owner aktif terakhir. |
-| API-008 | `POST /api/v1/users/{id}/password-reset` | `users:manage` | Owner menetapkan password sementara; user wajib mengganti saat login pertama; semua sesi target dicabut. |
+| API-003 | `GET /api/v1/auth/me` | login | user aktif, role, `must_change_password`, expiry sesi dan `csrf_token` untuk mutasi berikutnya. |
+| API-004 | `POST /api/v1/auth/password` | login | `current_password`, `new_password` (min. 15 karakter); verifikasi password kini dan revoke sesi lain, sesi aktif dipertahankan. |
+| API-005 | `GET /api/v1/users` | `users:manage` | daftar akun (`id`, `username`, `role`, `is_active`, timestamp); tanpa hash password. |
+| API-006 | `POST /api/v1/users` | `users:manage` | `username`, `role`, `password` sementara (min. 15 karakter); akun harus mengganti kata sandi pada login pertama. |
+| API-007 | `PATCH /api/v1/users/{id}` | `users:manage` | ubah `username`, `role`, `is_active`; perubahan role/status revoke seluruh sesi terdampak. Tidak dapat mengubah role/nonaktifkan akun sendiri atau menonaktifkan Owner aktif terakhir. |
+| API-008 | `POST /api/v1/users/{id}/password-reset` | `users:manage` | `temporary_password` min. 15 karakter; Owner mereset akun lain, sesi target dicabut, dan penggantian diwajibkan sebelum mengakses fitur lain. |
+| API-009 | `DELETE /api/v1/users/{id}` | `users:manage` | nonaktifkan akun (soft-delete), pertahankan histori/audit dan revoke sesi; akun sendiri dan Owner aktif terakhir dilindungi. |
 
 Setiap request mutasi browser menyertakan `X-CSRF-Token` yang cocok dengan token sesi; login menerbitkan token, `/auth/me` menyediakannya kembali. API menolak token hilang/tidak cocok dengan `403 CSRF_FAILED`.
 
@@ -99,7 +100,7 @@ Setiap request mutasi browser menyertakan `X-CSRF-Token` yang cocok dengan token
 
 ## Implementasi PH-02
 
-[OpenAPI](../packages/api-client/openapi.json) dan [tipe TypeScript](../packages/api-client/src/schema.ts) digenerasi dari `toko-contracts`. Implementasi mencakup API-001–003, API-101–105, dan API-107. Login menerbitkan cookie sesi. `GET /auth/me` mengembalikan `data.user`, `data.expires_at`, dan `data.csrf_token`. Logout mencabut sesi aktif. Login menggunakan pembatasan percobaan per akun dan per proses. API-004–008 serta API-106 tetap mengikuti kontrak baseline untuk fase berikutnya.
+[OpenAPI](../packages/api-client/openapi.json) dan [tipe TypeScript](../packages/api-client/src/schema.ts) digenerasi dari `toko-contracts`. Implementasi mencakup API-001–009, API-101–105, dan API-107. Login menerbitkan cookie sesi; `/auth/me` memberikan role, `must_change_password`, expiry dan token CSRF. Password sementara memblokir rute bisnis sampai diganti. Pengelolaan user hanya Owner, menonaktifkan akun tanpa menghapus lineage, mempertahankan minimal satu Owner aktif, dan mencabut sesi setelah reset/perubahan akses. API-106 tetap mengikuti kontrak baseline.
 
 API-102 mengembalikan HTTP 201. Untuk API-104, payload sintetis `{"expected_version":1,"code":null}` menghapus kode opsional. Field yang absen tidak diubah. Kode duplikat menghasilkan `409 CUSTOMER_CODE_CONFLICT` dengan error field `code`. Versi usang menghasilkan `409 VERSION_CONFLICT` dengan error field `expected_version`.
 

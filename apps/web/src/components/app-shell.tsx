@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Users, Clock, FileSpreadsheet, LogOut, Shield, User, Store } from "lucide-react";
+import { Users, Clock, FileSpreadsheet, LogOut, Shield, User, Store, KeyRound, UserCog } from "lucide-react";
 import type { Schema } from "../api";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -16,11 +16,13 @@ export function AppShell({
   onLogout,
   children,
   actionButton,
+  passwordChangeRequired = false,
 }: {
   session: Schema["SessionDetails"];
   onLogout: () => void;
   children: ReactNode;
   actionButton?: ReactNode;
+  passwordChangeRequired?: boolean;
 }) {
   const location = useLocation();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -30,6 +32,8 @@ export function AppShell({
   const getPageTitle = () => {
     if (location.pathname.startsWith("/reports/aging")) return "Laporan Umur Piutang";
     if (location.pathname.startsWith("/imports")) return "Import Workbook Historis";
+    if (location.pathname.startsWith("/settings/users")) return "Manajemen Pengguna";
+    if (location.pathname.startsWith("/settings/account")) return "Pengaturan Akun";
     if (location.pathname.startsWith("/customers/")) return "Detail Pelanggan";
     return "Daftar Pelanggan";
   };
@@ -57,6 +61,7 @@ export function AppShell({
 
           {/* Navigation Tabs (Desktop) */}
           <nav aria-label="Navigasi Utama" className="hidden md:flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+            {!passwordChangeRequired && <>
             <NavLink
               to="/customers"
               className={({ isActive }) =>
@@ -100,6 +105,9 @@ export function AppShell({
                 <span>Import Workbook</span>
               </NavLink>
             )}
+            {session.user.role === "owner" && <NavLink to="/settings/users" className={({ isActive }) => `inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${isActive ? "bg-white text-emerald-950 shadow-2xs" : "text-slate-600 hover:text-slate-900 hover:bg-white/50"}`}><UserCog className="h-4 w-4 text-emerald-700" /><span>Pengguna</span></NavLink>}
+            </>}
+            <NavLink to="/settings/account" className={({ isActive }) => `inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${isActive ? "bg-white text-emerald-950 shadow-2xs" : "text-slate-600 hover:text-slate-900 hover:bg-white/50"}`}><KeyRound className="h-4 w-4 text-emerald-700" /><span>Kata Sandi</span></NavLink>
           </nav>
 
           {/* Account Profile & Logout */}
@@ -134,6 +142,7 @@ export function AppShell({
 
         {/* Mobile Navigation bar */}
         <nav aria-label="Navigasi Mobile" className="flex md:hidden items-center justify-around gap-1 pt-2.5 mt-2.5 border-t border-slate-200">
+          {!passwordChangeRequired && <>
           <NavLink
             to="/customers"
             className={({ isActive }) =>
@@ -169,6 +178,9 @@ export function AppShell({
               <span>Import</span>
             </NavLink>
           )}
+          {session.user.role === "owner" && <NavLink to="/settings/users" className={({ isActive }) => `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"}`}><UserCog className="h-3.5 w-3.5" /><span>Pengguna</span></NavLink>}
+          </>}
+          <NavLink to="/settings/account" className={({ isActive }) => `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"}`}><KeyRound className="h-3.5 w-3.5" /><span>Akun</span></NavLink>
         </nav>
       </header>
 

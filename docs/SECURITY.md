@@ -10,7 +10,7 @@ Nama/alamat/kode pelanggan, histori piutang, pembayaran, akun, workbook, staging
 
 - Akun lokal individual username/password; role `owner/operator/viewer`; default deny dan authorization Axum per aksi.
 - Hash password dengan Argon2id mengikuti OWASP Password Storage; parameter produksi ditune pada hardware, paling rendah baseline rekomendasi OWASP saat implementasi.
-- Session server-side opaque; cookie `__Host-session; Secure; HttpOnly; SameSite=Strict; Path=/`, HTTPS-only, CSRF token pada state changes. Sesi web 12 jam absolut, 30 menit idle; logout/reset/disable mencabut sesi.
+- Session server-side opaque; cookie `__Host-session; Secure; HttpOnly; SameSite=Strict; Path=/`, HTTPS-only, CSRF token pada state changes. Sesi web 12 jam absolut, 30 menit idle; logout/reset/perubahan role/disable mencabut sesi terdampak. Password sementara hanya boleh mengakses `/auth/me`, logout, dan ganti password sampai password baru dibuat.
 - Login dibatasi rate, password disimpan tidak pernah plaintext/encrypted reversible. MFA bukan kebutuhan MVP; akun Owner memakai password unik dan tersedia audit perubahan akses.
 
 ## Aplikasi, API dan database

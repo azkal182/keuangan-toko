@@ -13,7 +13,7 @@
 
 | Entitas | Field utama | Makna/aturan final |
 |---|---|---|
-| `users` | `id`, `username`, `password_hash`, `role`, `is_active` | Akun personal; role `owner/operator/viewer`; password Argon2id. Minimal satu Owner aktif. |
+| `users` | `id`, `username`, `password_hash`, `role`, `is_active`, `must_change_password`, `created_at`, `updated_at` | Akun personal; role `owner/operator/viewer`; password Argon2id. Password sementara memaksa perubahan saat login; minimal satu Owner aktif. |
 | `sessions` | `id`, `user_id`, `token_hash`, `created_at`, `expires_at`, `revoked_at` | Server-side session; token mentah tidak disimpan; revoke pada logout/perubahan keamanan. |
 | `customers` | `id`, `code`, `normalized_code`, `name`, `address`, `is_active`, `version` | UUID stabil; code opsional unik setelah trim/case-fold; name wajib; address opsional; tidak hard-delete. |
 | `credit_sales` | `id`, `customer_id`, `effective_date`, `reference_no`, `status`, `total_idr`, `version`, `posted_by`, `posted_at` | `draft/posted/reversed`; invoice satu customer, banyak items; draft dapat diedit; posted immutable. |

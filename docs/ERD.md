@@ -29,7 +29,7 @@ erDiagram
 
 | Tabel | Field inti | Aturan utama |
 |---|---|---|
-| `users` | `id UUID PK`, `username TEXT UNIQUE`, `password_hash TEXT`, `role TEXT`, `is_active BOOL`, `created_at`, `updated_at` | `role IN ('owner','operator','viewer')`; password hanya berupa hash Argon2id. Minimal satu Owner aktif. |
+| `users` | `id UUID PK`, `username TEXT UNIQUE`, `password_hash TEXT`, `role TEXT`, `is_active BOOL`, `must_change_password BOOL`, `created_at`, `updated_at` | `role IN ('owner','operator','viewer')`; password hanya berupa hash Argon2id. Password sementara memblokir akses sampai diganti. Minimal satu Owner aktif. |
 | `sessions` | `id UUID PK`, `user_id UUID FK`, `token_hash BYTEA UNIQUE`, `created_at`, `last_seen_at`, `expires_at`, `revoked_at NULL` | Token mentah tidak disimpan; expiry absolut 12 jam dan idle 30 menit; logout/revoke langsung invalid. |
 | `customers` | `id UUID PK`, `code TEXT NULL`, `normalized_code TEXT NULL`, `name TEXT`, `address TEXT NULL`, `is_active BOOL`, `version INT`, `created_by UUID FK`, `created_at`, `updated_at` | Nama trim nonempty; unique partial index pada `normalized_code IS NOT NULL`; tidak hard-delete. |
 | `credit_sales` | `id UUID PK`, `customer_id UUID FK`, `effective_date DATE`, `reference_no TEXT NULL`, `backdate_reason TEXT NULL`, `status TEXT`, `total_idr BIGINT`, `version INT`, `created_by UUID FK`, `posted_by UUID FK NULL`, `created_at`, `posted_at NULL` | Status `draft/posted/reversed`; total >0; hanya draft dapat diedit; posting atomik membuat satu debit ledger. |
@@ -58,6 +58,8 @@ Koreksi transaksi posted membalik event dan alokasinya dengan kontra-event; repl
 ## Implementasi PH-01
 
 [Migrasi 0001](../migrations/postgres/0001_customer_ledger_foundation.sql) merealisasikan tabel `users`, `sessions`, `customers`, dan `receivable_entries`. Guard ledger mengizinkan perubahan tautan pelanggan untuk mendukung merge yang kelak diaudit dan melindungi kolom event lainnya dari perubahan. Tabel dan invariant lintas transaksi lainnya direalisasikan bersama alur yang menggunakannya. Kode pelanggan dinormalisasi di domain sebelum disimpan dan indeks unik PostgreSQL menangani benturan nilai ternormalisasi.
+
+[Migrasi 0008](../migrations/postgres/0008_user_password_change.sql) menambah `users.must_change_password` dengan default `false`, sehingga akun yang sudah ada tetap dapat masuk tanpa forced reset. Akun baru dan reset Owner menetapkan flag tersebut.
 
 ## Implementasi PH-02
 

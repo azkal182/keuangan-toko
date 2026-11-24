@@ -29,6 +29,8 @@ const PaymentsPanel = lazy(() => import("./payments").then((module) => ({ defaul
 const Ledger = lazy(() => import("./ledger").then((module) => ({ default: module.Ledger })));
 const ReceivablesAging = lazy(() => import("./reports").then((module) => ({ default: module.ReceivablesAging })));
 const ImportWorkspace = lazy(() => import("./imports").then((module) => ({ default: module.ImportWorkspace })));
+const UserManagementPage = lazy(() => import("./users").then((module) => ({ default: module.UserManagementPage })));
+const ChangePasswordPage = lazy(() => import("./users").then((module) => ({ default: module.ChangePasswordPage })));
 
 const agingLabels = [
   "0–15 hari",
@@ -62,9 +64,11 @@ function unpackCustomer(value: CustomerSummary | Schema["Customer"]) {
 export function CustomerWorkspace({
   session,
   onLogout,
+  onPasswordChanged,
 }: {
   session: Schema["SessionDetails"];
   onLogout: () => void;
+  onPasswordChanged: () => void;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -72,8 +76,14 @@ export function CustomerWorkspace({
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState("");
   const canWrite = session.user.role !== "viewer";
-
   useEffect(() => setCreating(false), [location.pathname]);
+
+  if (session.must_change_password) {
+    if (location.pathname !== "/settings/account") return <Navigate to="/settings/account" replace />;
+    return <AppShell session={session} onLogout={onLogout} passwordChangeRequired>
+      <ChangePasswordPage csrf={session.csrf_token} onChanged={onPasswordChanged} />
+    </AppShell>;
+  }
 
   function select(id?: string) {
     const from = `${location.pathname}${location.search}`;
@@ -146,6 +156,13 @@ export function CustomerWorkspace({
             }
           />
           <Route path="reports/aging" element={<ReceivablesAging />} />
+          <Route
+            path="settings/users"
+            element={session.user.role === "owner"
+              ? <UserManagementPage csrf={session.csrf_token} currentUserId={session.user.id} />
+              : <Navigate to="/customers" replace />}
+          />
+          <Route path="settings/account" element={<ChangePasswordPage csrf={session.csrf_token} onChanged={onPasswordChanged} />} />
           <Route
             path="imports"
             element={

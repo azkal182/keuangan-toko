@@ -7,12 +7,13 @@ mod payments;
 mod reports;
 mod sales;
 mod transactions;
+mod users;
 
 use axum::{
     Router,
     extract::DefaultBodyLimit,
     middleware,
-    routing::{MethodRouter, get, patch, post},
+    routing::{MethodRouter, delete, get, patch, post},
 };
 use sqlx::PgPool;
 use toko_application::Permission;
@@ -36,6 +37,24 @@ pub fn app(pool: PgPool) -> Router {
         .route(
             "/api/v1/auth/logout",
             protected(post(auth::logout), Permission::Authenticated),
+        )
+        .route(
+            "/api/v1/auth/password",
+            protected(post(users::change_password), Permission::Authenticated),
+        )
+        .route(
+            "/api/v1/users",
+            protected(get(users::list), Permission::UsersManage)
+                .merge(protected(post(users::create), Permission::UsersManage)),
+        )
+        .route(
+            "/api/v1/users/{id}",
+            protected(patch(users::update), Permission::UsersManage)
+                .merge(protected(delete(users::deactivate), Permission::UsersManage)),
+        )
+        .route(
+            "/api/v1/users/{id}/password-reset",
+            protected(post(users::reset_password), Permission::UsersManage),
         )
         .route(
             "/api/v1/customers",

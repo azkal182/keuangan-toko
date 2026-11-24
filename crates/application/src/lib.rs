@@ -20,6 +20,7 @@ pub enum Permission {
     ImportsCommit,
     TransactionsReverse,
     CreditsReallocate,
+    UsersManage,
 }
 
 impl Permission {
@@ -44,7 +45,8 @@ impl Permission {
             | Self::ImportsOverride
             | Self::ImportsCommit
             | Self::TransactionsReverse
-            | Self::CreditsReallocate => role == Role::Owner,
+            | Self::CreditsReallocate
+            | Self::UsersManage => role == Role::Owner,
         }
     }
 }

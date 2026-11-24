@@ -67,7 +67,7 @@ export function App() {
   if (!signedOut && session) {
     return (
       <Routes>
-        <Route path="/login" element={<ReturnToRoute />} />
+        <Route path="/login" element={<ReturnToRoute passwordChangeRequired={session.must_change_password} />} />
         <Route
           path="/*"
           element={
@@ -83,9 +83,17 @@ export function App() {
             >
               <CustomerWorkspace
                 session={session}
+                onPasswordChanged={() => setSignedIn({ ...session, must_change_password: false })}
                 onLogout={() => {
-                  setSignedIn(undefined);
-                  setSignedOut(true);
+                  void (async () => {
+                    try {
+                      readResult(await api.POST("/api/v1/auth/logout", {
+                        params: { header: { "X-CSRF-Token": session.csrf_token } },
+                      }));
+                    } catch { /* Local sign-out still completes when the session has expired. */ }
+                    setSignedIn(undefined);
+                    setSignedOut(true);
+                  })();
                 }}
               />
             </Suspense>
@@ -103,10 +111,10 @@ export function App() {
   );
 }
 
-function ReturnToRoute() {
+function ReturnToRoute({ passwordChangeRequired = false }: { passwordChangeRequired?: boolean }) {
   const location = useLocation();
   const from = (location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null)?.from;
-  const target = from?.pathname?.startsWith("/") && !from.pathname.startsWith("//")
+  const target = passwordChangeRequired ? "/settings/account" : from?.pathname?.startsWith("/") && !from.pathname.startsWith("//")
     ? `${from.pathname}${from.search ?? ""}${from.hash ?? ""}`
     : "/customers";
   return <Navigate to={target} replace />;

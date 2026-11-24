@@ -62,6 +62,8 @@ Posted sale/payment/ledger tidak diedit atau dihapus. Owner melakukan reversal d
 
 - **AC-014:** request tanpa permission ditolak dan tidak mengubah saldo.
 - **AC-015:** koreksi menyimpan tautan transaksi asal, reversal dan transaksi pengganti.
+- **AC-018:** Owner dapat melihat, membuat, mengubah, menonaktifkan, mengaktifkan, dan mereset kata sandi akun; API menolak pengelolaan akun oleh role lain dan selalu mempertahankan minimal satu Owner aktif.
+- **AC-019:** kata sandi sementara setelah pembuatan/reset wajib diganti sebelum endpoint bisnis dapat dipakai. Penggantian kata sandi sendiri memverifikasi kata sandi lama dan membatalkan sesi lain.
 - **Permission:** `transactions:reverse` Owner-only; user/role changes `users:manage` Owner-only.
 
 ## FR-008 — Desktop GPUI offline-first (PH-09)
