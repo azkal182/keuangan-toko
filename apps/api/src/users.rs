@@ -89,7 +89,11 @@ fn username_conflict(request: RequestId) -> Failure {
 }
 
 fn user_not_found(request: RequestId) -> Failure {
-    request.error(StatusCode::NOT_FOUND, "USER_NOT_FOUND", "Pengguna tidak ditemukan")
+    request.error(
+        StatusCode::NOT_FOUND,
+        "USER_NOT_FOUND",
+        "Pengguna tidak ditemukan",
+    )
 }
 
 fn owner_required(request: RequestId) -> Failure {
@@ -122,7 +126,10 @@ async fn audit(
     Ok(())
 }
 
-fn user_response(row: UserRow, request: RequestId) -> Result<Json<contract::UserResponse>, Failure> {
+fn user_response(
+    row: UserRow,
+    request: RequestId,
+) -> Result<Json<contract::UserResponse>, Failure> {
     Ok(Json(contract::UserResponse {
         data: map_user(row, request)?,
         meta: EmptyMeta::default(),
@@ -173,7 +180,11 @@ pub async fn create(
     .await
     {
         Ok(row) => row,
-        Err(error) if error.as_database_error().is_some_and(|db| db.is_unique_violation()) => {
+        Err(error)
+            if error
+                .as_database_error()
+                .is_some_and(|db| db.is_unique_violation()) =>
+        {
             return Err(username_conflict(request));
         }
         Err(_) => return Err(request.internal()),
@@ -233,29 +244,31 @@ pub async fn update(
     .await
     {
         Ok(row) => row,
-        Err(error) if error.as_database_error().is_some_and(|db| db.is_unique_violation()) => {
+        Err(error)
+            if error
+                .as_database_error()
+                .is_some_and(|db| db.is_unique_violation()) =>
+        {
             return Err(username_conflict(request));
         }
         Err(_) => return Err(request.internal()),
     };
-    let active_owners: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM users WHERE role = 'owner' AND is_active",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|_| request.internal())?;
+    let active_owners: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM users WHERE role = 'owner' AND is_active")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| request.internal())?;
     if active_owners == 0 {
         return Err(owner_required(request));
     }
-    if !row.is_active
-        || row.is_active != current.is_active
-        || row.role != current.role
-    {
-        sqlx::query("UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL")
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| request.internal())?;
+    if !row.is_active || row.is_active != current.is_active || row.role != current.role {
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| request.internal())?;
     }
     audit(&mut tx, session.user_id, "user.update", id, request).await?;
     tx.commit().await.map_err(|_| request.internal())?;
@@ -289,12 +302,11 @@ pub async fn deactivate(
     .await
     .map_err(|_| request.internal())?;
     let row = row.ok_or_else(|| user_not_found(request))?;
-    let active_owners: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM users WHERE role = 'owner' AND is_active",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|_| request.internal())?;
+    let active_owners: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM users WHERE role = 'owner' AND is_active")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| request.internal())?;
     if active_owners == 0 {
         return Err(owner_required(request));
     }
@@ -361,21 +373,25 @@ pub async fn change_password(
             "Kata sandi baru harus berbeda dari kata sandi saat ini",
         ));
     }
-    let old_hash: Option<String> = sqlx::query_scalar(
-        "SELECT password_hash FROM users WHERE id = $1 AND is_active",
-    )
-    .bind(session.user_id)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|_| request.internal())?;
+    let old_hash: Option<String> =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1 AND is_active")
+            .bind(session.user_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|_| request.internal())?;
     let old_hash = old_hash.ok_or_else(|| user_not_found(request))?;
     let current_password = input.current_password;
     let verified = tokio::task::spawn_blocking({
         let old_hash = old_hash.clone();
         move || {
-            use argon2::{Argon2, password_hash::{PasswordHash, PasswordVerifier}};
+            use argon2::{
+                Argon2,
+                password_hash::{PasswordHash, PasswordVerifier},
+            };
             PasswordHash::new(&old_hash).is_ok_and(|parsed| {
-                Argon2::default().verify_password(current_password.as_bytes(), &parsed).is_ok()
+                Argon2::default()
+                    .verify_password(current_password.as_bytes(), &parsed)
+                    .is_ok()
             })
         }
     })
@@ -416,7 +432,14 @@ pub async fn change_password(
     .execute(&mut *tx)
     .await
     .map_err(|_| request.internal())?;
-    audit(&mut tx, session.user_id, "auth.password_change", session.user_id, request).await?;
+    audit(
+        &mut tx,
+        session.user_id,
+        "auth.password_change",
+        session.user_id,
+        request,
+    )
+    .await?;
     tx.commit().await.map_err(|_| request.internal())?;
     Ok(Json(contract::PasswordChangedResponse {
         data: contract::PasswordChanged { changed: true },

@@ -49,8 +49,10 @@ pub fn app(pool: PgPool) -> Router {
         )
         .route(
             "/api/v1/users/{id}",
-            protected(patch(users::update), Permission::UsersManage)
-                .merge(protected(delete(users::deactivate), Permission::UsersManage)),
+            protected(patch(users::update), Permission::UsersManage).merge(protected(
+                delete(users::deactivate),
+                Permission::UsersManage,
+            )),
         )
         .route(
             "/api/v1/users/{id}/password-reset",
