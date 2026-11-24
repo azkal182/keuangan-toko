@@ -11,6 +11,7 @@ import {
   UserCheck,
   UserX,
   Users,
+  X,
 } from "lucide-react";
 import { api, failure, readResult, useResource, type ApiFailure, type Schema } from "./api";
 import { AppShell } from "./components/app-shell";
@@ -355,8 +356,24 @@ function CustomerList({ onSelect, revision }: { onSelect: (id: string) => void; 
                   value={search}
                   maxLength={256}
                   onChange={(event) => setSearch(event.target.value)}
-                  className="pl-9 h-9 text-xs"
+                  className={`pl-9 ${search ? "pr-8" : ""} h-9 text-xs`}
                 />
+                {search && (
+                  <button
+                    type="button"
+                    title="Hapus pencarian"
+                    onClick={() => {
+                      setSearch("");
+                      const next = new URLSearchParams(searchParams);
+                      next.delete("search");
+                      next.delete("page_cursor");
+                      setSearchParams(next);
+                    }}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
               <Button type="submit" variant="secondary" size="sm" className="shrink-0 text-xs font-semibold">
                 Cari
