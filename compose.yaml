@@ -1,0 +1,92 @@
+services:
+  db:
+    image: postgres:18.7-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: toko
+      POSTGRES_USER: toko
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the server .env file}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toko -d toko"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    cpus: 1.0
+    mem_limit: 1536m
+
+  migrate:
+    image: ${API_IMAGE:?Set API_IMAGE}:${IMAGE_TAG:-latest}
+    command: ["migrate-postgres"]
+    environment:
+      DATABASE_URL: postgres://toko:${POSTGRES_PASSWORD}@db:5432/toko
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: "no"
+
+  api:
+    image: ${API_IMAGE:?Set API_IMAGE}:${IMAGE_TAG:-latest}
+    command: ["toko-api"]
+    restart: unless-stopped
+    environment:
+      API_BIND_ADDR: 0.0.0.0:3000
+      DATABASE_URL: postgres://toko:${POSTGRES_PASSWORD}@db:5432/toko
+      RUST_LOG: info
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3000/api/v1/auth/me)\" = 401"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    cpus: 1.0
+    mem_limit: 768m
+
+  web:
+    image: ${WEB_IMAGE:?Set WEB_IMAGE}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend
+      - edge
+    mem_limit: 128m
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./infra/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    networks:
+      - edge
+    mem_limit: 128m
+
+networks:
+  backend:
+    internal: true
+  edge:
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

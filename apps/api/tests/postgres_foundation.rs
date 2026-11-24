@@ -225,7 +225,7 @@ fn synthetic_xlsx() -> Vec<u8> {
         ),
         (
             "xl/worksheets/sheet1.xml",
-            r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:H3"/><sheetData><row r="1"><c r="A1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="s"><v>0</v></c><c r="B2" t="s"><v>2</v></c><c r="C2" t="s"><v>3</v></c><c r="F2"><v>100000</v></c><c r="H2"><f>F2+G2</f><v>100000</v></c></row><row r="3"><c r="A3" t="s"><v>0</v></c><c r="B3" t="s"><v>2</v></c><c r="C3" t="s"><v>3</v></c><c r="G3"><v>120000</v></c></row></sheetData></worksheet>"#,
+            r#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:H8"/><sheetData><row r="1"><c r="A1" t="s"><v>1</v></c></row><row r="2"><c r="B2" t="s"><v>2</v></c></row><row r="3"><c r="B3" t="s"><v>3</v></c></row><row r="7"><c r="A7" t="s"><v>0</v></c><c r="B7" t="s"><v>2</v></c><c r="C7" t="s"><v>3</v></c><c r="F7"><v>100000</v></c><c r="H7"><f>F7+G7</f><v>100000</v></c></row><row r="8"><c r="A8" t="s"><v>0</v></c><c r="B8" t="s"><v>2</v></c><c r="C8" t="s"><v>3</v></c><c r="G8"><v>120000</v></c></row></sheetData></worksheet>"#,
         ),
     ];
     for (name, content) in files {
@@ -734,7 +734,7 @@ async fn customer_slice(pool: PgPool) {
     assert_eq!(search.status(), StatusCode::OK);
     let search = json(search).await;
     assert_eq!(search["data"]["items"].as_array().unwrap().len(), 1);
-    assert_eq!(search["data"]["items"][0]["id"], CUSTOMER_A);
+    assert_eq!(search["data"]["items"][0]["customer"]["id"], CUSTOMER_A);
 
     for (id, outstanding, credit, balance) in [
         (CUSTOMER_A, "60000", "0", "60000"),
