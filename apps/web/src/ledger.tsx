@@ -1,16 +1,10 @@
 import { useCallback, useState } from "react";
-import { api, readResult, useResource } from "./api";
+import { api, readResult, useResource, type Schema } from "./api";
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { LegacyCreditApplication, ReverseTransactionAction } from "./corrections";
-
-const rupiah = new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+import { formatRupiah } from "./money";
 const businessDate = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-
-export function formatRupiah(amount: string) {
-  return rupiah.format(BigInt(amount));
-}
 
 const entryLabels: Record<string, string> = {
   sale: "Penjualan kredit", credit_sale: "Penjualan kredit",
@@ -18,8 +12,8 @@ const entryLabels: Record<string, string> = {
   reversal: "Pembalikan",
 };
 
-export function Ledger({ id, openSale, csrf, owner, onChanged }: {
-  id: string; openSale: (id: string) => void; csrf: string; owner: boolean; onChanged: () => void;
+export function Ledger({ id, openSale }: {
+  id: string; openSale: (id: string) => void;
 }) {
   const [query, setQuery] = useState<{ from?: string; to?: string; cursors: string[] }>({ cursors: [] });
   const cursor = query.cursors.at(-1);
@@ -49,7 +43,8 @@ export function Ledger({ id, openSale, csrf, owner, onChanged }: {
           {state.data.data.entries.length === 0 ? (
             <p className="empty-state">Belum ada transaksi untuk periode ini.</p>
           ) : (
-            <div className="table-scroll" tabIndex={0} role="region" aria-label="Riwayat transaksi">
+            <>
+            <div className="table-scroll ledger-desktop" tabIndex={0} role="region" aria-label="Riwayat transaksi">
               <table>
                 <caption className="sr-only">Riwayat transaksi buku piutang</caption>
                 <thead>
@@ -62,10 +57,7 @@ export function Ledger({ id, openSale, csrf, owner, onChanged }: {
                       <td>{entry.effective_date ? businessDate.format(new Date(entry.effective_date)) : "Tidak diketahui"}</td>
                       <td>
                         {entry.entry_type === "credit_sale" && entry.description ? <button type="button" className="sale-link" onClick={() => openSale(entry.source_id)}>{entry.description}</button> : <strong>{entry.description ?? entryLabels[entry.entry_type] ?? entry.entry_type}</strong>}
-                        {owner && entry.entry_type.startsWith("legacy_") && !entry.is_reversed && <div className="stack">
-                          {entry.entry_type === "legacy_payment" && BigInt(entry.credit_idr) > BigInt(entry.allocated_idr) && <LegacyCreditApplication customerId={id} paymentSourceId={entry.source_id} availableAmount={(BigInt(entry.credit_idr) - BigInt(entry.allocated_idr)).toString()} csrf={csrf} onChanged={() => { reload(); onChanged(); }} />}
-                          <ReverseTransactionAction id={entry.id} csrf={csrf} onChanged={() => { reload(); onChanged(); }} />
-                        </div>}
+                        {entry.is_reversed && <span className="table-note">Dibalik</span>}
                       </td>
                       <td className="number">{entry.quantity ?? "—"}</td>
                       <td className="number">{entry.unit_price_idr == null ? "—" : formatRupiah(entry.unit_price_idr)}</td>
@@ -80,6 +72,10 @@ export function Ledger({ id, openSale, csrf, owner, onChanged }: {
                 </tbody>
               </table>
             </div>
+            <div className="ledger-mobile-cards" aria-label="Riwayat transaksi">
+              {state.data.data.entries.map((entry) => <LedgerMobileCard key={entry.id} entry={entry} openSale={openSale} />)}
+            </div>
+            </>
           )}
           {(query.cursors.length > 0 || state.data.meta.next_cursor) && (
             <div className="pagination">
@@ -94,4 +90,31 @@ export function Ledger({ id, openSale, csrf, owner, onChanged }: {
       )}
     </section>
   );
+}
+
+function LedgerMobileCard({ entry, openSale }: {
+  entry: Schema["LedgerEntry"];
+  openSale: (id: string) => void;
+}) {
+  const description = entry.description ?? entryLabels[entry.entry_type] ?? entry.entry_type;
+  return <article className="ledger-mobile-card">
+    <div className="ledger-mobile-heading">
+      <span>{entry.effective_date ? businessDate.format(new Date(entry.effective_date)) : "Tanggal tidak diketahui"}</span>
+      {entry.age_days != null && <span>{entry.age_days < 0 ? "Tanggal masa depan" : `${entry.age_days} hari`}</span>}
+    </div>
+    <strong>{entry.entry_type === "credit_sale" && entry.description
+      ? <button type="button" className="sale-link" onClick={() => openSale(entry.source_id)}>{description}</button>
+      : description}</strong>
+    {entry.is_reversed && <span className="badge">Dibalik</span>}
+    <dl className="ledger-mobile-values">
+      <div><dt>Jumlah</dt><dd>{entry.quantity ?? "—"}</dd></div>
+      <div><dt>Harga</dt><dd>{entry.unit_price_idr == null ? "—" : formatRupiah(entry.unit_price_idr)}</dd></div>
+      <div><dt>Debet</dt><dd>{entry.debit_idr === "0" ? "—" : formatRupiah(entry.debit_idr)}</dd></div>
+      <div><dt>Kredit</dt><dd>{entry.credit_idr === "0" ? "—" : formatRupiah(entry.credit_idr)}</dd></div>
+      <div><dt>Saldo</dt><dd>{formatRupiah(entry.running_balance_idr)}</dd></div>
+      <div><dt>Lunas</dt><dd>{BigInt(entry.debit_idr) === 0n ? "—" : formatRupiah(entry.allocated_idr)}</dd></div>
+      <div><dt>Sisa</dt><dd>{BigInt(entry.debit_idr) === 0n ? "—" : formatRupiah(entry.remaining_idr)}</dd></div>
+      <div><dt>Umur piutang</dt><dd>{entry.age_days == null ? (entry.debit_idr === "0" ? "—" : "Tanggal tidak diketahui") : entry.age_days < 0 ? "Tanggal masa depan" : `${entry.age_days} hari`}</dd></div>
+    </dl>
+  </article>;
 }

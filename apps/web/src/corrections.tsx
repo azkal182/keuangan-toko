@@ -3,7 +3,7 @@ import { api, failure, readResult, useResource, type Schema } from "./api";
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { formatRupiah } from "./ledger";
+import { formatRupiah } from "./money";
 import { Dialog } from "./components/ui/dialog";
 
 export function ReverseTransactionAction({ id, csrf, onChanged }: { id: string; csrf: string; onChanged: () => void }) {

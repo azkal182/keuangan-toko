@@ -1,79 +1,54 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, failure, readResult, useResource, type ApiFailure, type Schema } from "./api";
 import { Brand, ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { Ledger, formatRupiah } from "./ledger";
-import { SalesPanel } from "./sales";
-import { PaymentsPanel } from "./payments";
-import { ReceivablesAging } from "./reports";
-import { ImportWorkspace } from "./imports";
+import { formatRupiah } from "./money";
 import { Dialog } from "./components/ui/dialog";
 
-const labels: Record<Schema["UserRole"], string> = { owner: "Pemilik", operator: "Operator", viewer: "Pembaca" };
+const SalesPanel = lazy(() => import("./sales").then((module) => ({ default: module.SalesPanel })));
+const PaymentsPanel = lazy(() => import("./payments").then((module) => ({ default: module.PaymentsPanel })));
+const Ledger = lazy(() => import("./ledger").then((module) => ({ default: module.Ledger })));
+const ReceivablesAging = lazy(() => import("./reports").then((module) => ({ default: module.ReceivablesAging })));
+const ImportWorkspace = lazy(() => import("./imports").then((module) => ({ default: module.ImportWorkspace })));
 
-function selectedId() {
-  return new URLSearchParams(location.search).get("pelanggan") ?? undefined;
-}
+const labels: Record<Schema["UserRole"], string> = { owner: "Pemilik", operator: "Operator", viewer: "Pembaca" };
+const agingLabels = ["0–15 hari", "16–30 hari", "31–45 hari", "46–60 hari", "Lebih dari 60 hari", "Tanggal perlu ditinjau"];
 
 type CustomerSummary = Schema["CustomerList"]["items"][number];
 function unpackCustomer(value: CustomerSummary | Schema["Customer"]) {
   if ("customer" in value) return {
     customer: value.customer,
     outstanding: value.outstanding_idr,
-    credit: value.customer_credit_idr,
     aging: [value.days_0_15_idr, value.days_16_30_idr, value.days_31_45_idr, value.days_46_60_idr, value.days_over_60_idr],
     exceptions: BigInt(value.unknown_date_idr) + BigInt(value.future_date_idr),
   };
   // Older API processes return Customer directly. Keep the UI alive during a rolling restart.
-  return { customer: value, outstanding: undefined, credit: undefined, aging: undefined, exceptions: undefined };
+  return { customer: value, outstanding: undefined, aging: undefined, exceptions: undefined };
 }
 
 export function CustomerWorkspace({ session, onLogout }: {
   session: Schema["SessionDetails"];
   onLogout: () => void;
 }) {
-  const [selected, setSelected] = useState(selectedId);
-  const [saleId, setSaleId] = useState(() => new URLSearchParams(location.search).get("penjualan") ?? undefined);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState("");
   const [logoutError, setLogoutError] = useState<string>();
-  const [showReport, setShowReport] = useState(false);
-  const [showImports, setShowImports] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const sessionHeader = { "X-CSRF-Token": session.csrf_token };
   const canWrite = session.user.role !== "viewer";
 
-  useEffect(() => {
-    function onPopState() {
-      setSelected(selectedId());
-      setSaleId(new URLSearchParams(location.search).get("penjualan") ?? undefined);
-      setCreating(false);
-      setNotice("");
-    }
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  useEffect(() => setCreating(false), [location.pathname]);
 
   function select(id?: string) {
-    const url = new URL(location.href);
-    if (id) url.searchParams.set("pelanggan", id);
-    else url.searchParams.delete("pelanggan");
-    url.searchParams.delete("penjualan");
-    setSaleId(undefined);
-    if (url.href !== location.href) history.pushState(null, "", url);
-    setSelected(id);
+    const from = `${location.pathname}${location.search}`;
+    navigate(id ? `/customers/${id}` : "/customers", id ? { state: { from } } : undefined);
     setCreating(false);
     setNotice("");
-  }
-
-  function openSale(id?: string) {
-    const url = new URL(location.href);
-    if (id) url.searchParams.set("penjualan", id);
-    else url.searchParams.delete("penjualan");
-    if (url.href !== location.href) history.pushState(null, "", url);
-    setSaleId(id);
   }
 
   async function logout() {
@@ -103,71 +78,112 @@ export function CustomerWorkspace({ session, onLogout }: {
       </header>
       <main className="workspace">
         <div className="workspace-heading">
-          <h1>{showReport ? "Laporan piutang" : showImports ? "Import workbook" : "Pelanggan"}</h1>
-          <div className="pagination">
-            <Button variant="outline" aria-pressed={!showReport && !showImports} onClick={() => {setShowImports(false);setShowReport(false);select(undefined);}}>Pelanggan</Button>
-            <Button variant="outline" aria-pressed={showReport} onClick={() => {setShowImports(false);setShowReport(true);}}>Umur piutang</Button>
-            {canWrite && <Button variant="outline" aria-pressed={showImports} onClick={() => {setShowReport(false);setShowImports(true);}}>Import</Button>}
-            {!showReport && !showImports && canWrite && <Button onClick={() => { setCreating(true); setNotice(""); }}>Tambah pelanggan</Button>}
-          </div>
+          <h1>{location.pathname.startsWith("/reports/") ? "Laporan piutang" : location.pathname.startsWith("/imports") ? "Import workbook" : location.pathname.startsWith("/customers/") ? "Detail pelanggan" : "Pelanggan"}</h1>
+          <nav className="workspace-nav" aria-label="Navigasi utama">
+            <NavLink to="/customers" className={({ isActive }) => `button button-outline${isActive ? " nav-link-active" : ""}`}>Pelanggan</NavLink>
+            <NavLink to="/reports/aging" className={({ isActive }) => `button button-outline${isActive ? " nav-link-active" : ""}`}>Umur piutang</NavLink>
+            {canWrite && <NavLink to="/imports" className={({ isActive }) => `button button-outline${isActive ? " nav-link-active" : ""}`}>Import</NavLink>}
+            {location.pathname === "/customers" && canWrite && <Button onClick={() => { setCreating(true); setNotice(""); }}>Tambah pelanggan</Button>}
+          </nav>
         </div>
         {logoutError && <ErrorNotice message={logoutError} />}
         {notice && <p className="notice-success" role="status">{notice}</p>}
-        {showReport ? <ReceivablesAging /> : showImports ? <ImportWorkspace csrf={session.csrf_token} owner={session.user.role === "owner"} /> : selected ? (
-          <div className="customer-detail-page stack">
-            <Button variant="outline" className="back-to-customers" onClick={() => select(undefined)}>← Ringkasan pelanggan</Button>
-            <CustomerDetail
-              key={`${selected}:${revision}`}
-              id={selected}
-              csrf={session.csrf_token}
-              canWrite={canWrite}
-              canMerge={session.user.role === "owner"}
-              saleId={saleId}
-              openSale={openSale}
-              onDataChanged={() => setRevision((value) => value + 1)}
-              onSaved={() => {
-                setRevision((value) => value + 1);
-                setNotice("Perubahan pelanggan berhasil disimpan.");
-              }}
-              onMerged={(id) => {
-                select(id);
-                setRevision((value) => value + 1);
-                setNotice("Pelanggan berhasil digabung.");
-              }}
-            />
-          </div>
-        ) : <CustomerList onSelect={select} revision={revision} />}
+        <Suspense fallback={<p className="panel" role="status">Memuat halaman…</p>}>
+          <Routes>
+            <Route path="customers" element={<CustomerList onSelect={select} revision={revision} />} />
+            <Route path="customers/:customerId" element={<CustomerDetailRoute csrf={session.csrf_token} canWrite={canWrite} canMerge={session.user.role === "owner"} revision={revision} onChanged={() => setRevision((value) => value + 1)} onNotice={setNotice} />} />
+            <Route path="customers/:customerId/sales/:saleId" element={<CustomerDetailRoute csrf={session.csrf_token} canWrite={canWrite} canMerge={session.user.role === "owner"} revision={revision} onChanged={() => setRevision((value) => value + 1)} onNotice={setNotice} />} />
+            <Route path="reports/aging" element={<ReceivablesAging />} />
+            <Route path="imports" element={canWrite ? <ImportWorkspace csrf={session.csrf_token} owner={session.user.role === "owner"} /> : <Navigate to="/customers" replace />} />
+            <Route path="imports/:batchId" element={canWrite ? <ImportWorkspace csrf={session.csrf_token} owner={session.user.role === "owner"} /> : <Navigate to="/customers" replace />} />
+            <Route path="" element={<LegacyCustomerRedirect />} />
+            <Route path="*" element={<Navigate to="/customers" replace />} />
+          </Routes>
+        </Suspense>
         <Dialog open={creating} onOpenChange={setCreating} title="Tambah pelanggan">
           <CustomerForm csrf={session.csrf_token} onCancel={() => setCreating(false)} onSaved={(customer) => {
-                  select(customer.id);
-                  setCreating(false);
-                  setRevision((value) => value + 1);
-                  setNotice("Pelanggan berhasil disimpan.");
-                }} />
+            select(customer.id);
+            setCreating(false);
+            setRevision((value) => value + 1);
+            setNotice("Pelanggan berhasil disimpan.");
+          }} />
         </Dialog>
       </main>
     </>
   );
 }
 
+function LegacyCustomerRedirect() {
+  const [searchParams] = useSearchParams();
+  const customerId = searchParams.get("pelanggan");
+  const saleId = searchParams.get("penjualan");
+  if (!customerId) return <Navigate to="/customers" replace />;
+  return <Navigate to={saleId ? `/customers/${customerId}/sales/${saleId}` : `/customers/${customerId}`} replace />;
+}
+
+function CustomerDetailRoute({ csrf, canWrite, canMerge, revision, onChanged, onNotice }: {
+  csrf: string; canWrite: boolean; canMerge: boolean; revision: number;
+  onChanged: () => void; onNotice: (message: string) => void;
+}) {
+  const { customerId, saleId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  if (!customerId) return <Navigate to="/customers" replace />;
+  const returnPath = (location.state as { from?: unknown } | null)?.from;
+  const backToList = typeof returnPath === "string" && returnPath.startsWith("/customers") && !returnPath.startsWith("//")
+    ? returnPath
+    : "/customers";
+  return <div className="customer-detail-page stack">
+    <Button variant="outline" className="back-to-customers" onClick={() => navigate(backToList)}>← Ringkasan pelanggan</Button>
+    <CustomerDetail
+      key={`${customerId}:${revision}`}
+      id={customerId}
+      csrf={csrf}
+      canWrite={canWrite}
+      canMerge={canMerge}
+      saleId={saleId}
+      openSale={(id) => navigate(id ? `/customers/${customerId}/sales/${id}` : `/customers/${customerId}`, { state: location.state })}
+      onDataChanged={onChanged}
+      onSaved={() => { onChanged(); onNotice("Perubahan pelanggan berhasil disimpan."); }}
+      onMerged={(id) => { navigate(`/customers/${id}`, { state: location.state }); onChanged(); onNotice("Pelanggan berhasil digabung."); }}
+    />
+  </div>;
+}
+
 function CustomerList({ onSelect, revision }: {
   onSelect: (id: string) => void;
   revision: number;
 }) {
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState<{ search: string; cursors: string[] }>({ search: "", cursors: [] });
-  const cursor = query.cursors.at(-1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const appliedSearch = searchParams.get("search") ?? "";
+  const pageCursors = searchParams.getAll("page_cursor");
+  const cursor = pageCursors.at(-1);
+  const [search, setSearch] = useState(appliedSearch);
+  useEffect(() => setSearch(appliedSearch), [appliedSearch]);
   const load = useCallback(async (signal: AbortSignal) => readResult(await api.GET("/api/v1/customers", {
-    params: { query: { search: query.search, cursor } }, signal,
-  })), [query, cursor, revision]);
+    params: { query: { search: appliedSearch, cursor } }, signal,
+  })), [appliedSearch, cursor, revision]);
   const { state, reload } = useResource(load);
+  function applySearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    const term = search.trim();
+    if (term) next.set("search", term);
+    else next.delete("search");
+    next.delete("page_cursor");
+    setSearchParams(next);
+  }
+  function movePage(direction: "previous" | "next", nextCursor?: string) {
+    const cursors = direction === "previous" ? pageCursors.slice(0, -1) : nextCursor ? [...pageCursors, nextCursor] : pageCursors;
+    const next = new URLSearchParams(searchParams);
+    next.delete("page_cursor");
+    for (const value of cursors) next.append("page_cursor", value);
+    setSearchParams(next);
+  }
   return (
     <section className="panel customer-list stack" aria-label="Daftar pelanggan">
       <div><h2>Ringkasan pelanggan</h2><p className="muted">Jumlah adalah total piutang terbuka. Bucket memakai umur kalender Asia/Jakarta; nominal bertanggal tidak diketahui atau masa depan ditampilkan di kolom peninjauan.</p></div>
-      <form className="search-form" onSubmit={(event) => {
-        event.preventDefault();
-        setQuery({ search: search.trim(), cursors: [] });
-      }}>
+      <form className="search-form" onSubmit={applySearch}>
         <Input aria-label="Nama atau kode pelanggan" placeholder="Nama atau kode" type="search" value={search} maxLength={256}
           onChange={(event) => setSearch(event.target.value)} />
         <Button type="submit" variant="outline">Cari</Button>
@@ -177,31 +193,47 @@ function CustomerList({ onSelect, revision }: {
       {state.status === "ready" && (
         <>
           {state.data.data.items.length === 0 ? <p className="muted">Tidak ada pelanggan yang ditemukan.</p> : (
-            <div className="table-scroll" tabIndex={0} role="region" aria-label="Ringkasan saldo pelanggan">
-              <table className="customer-summary-table"><thead><tr><th scope="col">Pelanggan</th><th scope="col" className="number">Jumlah</th><th scope="col" className="number">0–15 Hari</th><th scope="col" className="number">16–30 Hari</th><th scope="col" className="number">31–45 Hari</th><th scope="col" className="number">46–60 Hari</th><th scope="col" className="number">Lebih dari 60 Hari</th><th scope="col" className="number">Tanggal perlu ditinjau</th></tr></thead>
-                <tbody>{state.data.data.items.map((item) => {
-                  const { customer, outstanding, aging, exceptions } = unpackCustomer(item as CustomerSummary | Schema["Customer"]);
-                  return <tr key={customer.id}>
-                    <td><button type="button" className="customer-summary-link" onClick={() => onSelect(customer.id)}><strong>{customer.name}</strong><span className="table-note">{customer.code ?? "Tanpa kode"} {!customer.is_active && " · Nonaktif"}</span></button></td>
-                    <td className="number">{outstanding === undefined ? "—" : formatRupiah(outstanding)}</td>{aging?.map((amount, index) => <td className="number" key={index}>{formatRupiah(amount)}</td>)}{aging && <td className="number" title="Jumlah piutang dengan tanggal tidak diketahui atau tanggal masa depan">{formatRupiah(exceptions!.toString())}</td>}
-                  </tr>;
-                })}</tbody>
-              </table>
-            </div>
+            <>
+              <div className="table-scroll customer-summary-desktop" tabIndex={0} role="region" aria-label="Ringkasan saldo pelanggan">
+                <table className="customer-summary-table"><thead><tr><th scope="col">Pelanggan</th><th scope="col" className="number">Jumlah</th><th scope="col" className="number">0–15 Hari</th><th scope="col" className="number">16–30 Hari</th><th scope="col" className="number">31–45 Hari</th><th scope="col" className="number">46–60 Hari</th><th scope="col" className="number">Lebih dari 60 Hari</th><th scope="col" className="number">Tanggal perlu ditinjau</th></tr></thead>
+                  <tbody>{state.data.data.items.map((item) => {
+                    const { customer, outstanding, aging, exceptions } = unpackCustomer(item as CustomerSummary | Schema["Customer"]);
+                    return <tr key={customer.id}>
+                      <td><button type="button" className="customer-summary-link" onClick={() => onSelect(customer.id)}><strong>{customer.name}</strong><span className="table-note">{customer.code ?? "Tanpa kode"} {!customer.is_active && " · Nonaktif"}</span></button></td>
+                      <td className="number">{outstanding === undefined ? "—" : formatRupiah(outstanding)}</td>{aging?.map((amount, index) => <td className="number" key={index}>{formatRupiah(amount)}</td>)}{aging && <td className="number" title="Jumlah piutang dengan tanggal tidak diketahui atau tanggal masa depan">{formatRupiah(exceptions!.toString())}</td>}
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div>
+              <div className="customer-summary-cards" aria-label="Ringkasan pelanggan">
+                {state.data.data.items.map((item) => <CustomerSummaryCard key={("customer" in item ? item.customer : item).id} item={item as CustomerSummary | Schema["Customer"]} onSelect={onSelect} />)}
+              </div>
+            </>
           )}
-          {(query.cursors.length > 0 || state.data.meta.next_cursor) && (
+          {(pageCursors.length > 0 || state.data.meta.next_cursor) && (
             <div className="pagination">
-              <Button variant="outline" disabled={!query.cursors.length} onClick={() => setQuery({ ...query, cursors: query.cursors.slice(0, -1) })}>Sebelumnya</Button>
-              <Button variant="outline" disabled={!state.data.meta.next_cursor} onClick={() => {
-                const next = state.data.meta.next_cursor;
-                if (next) setQuery({ ...query, cursors: [...query.cursors, next] });
-              }}>Berikutnya</Button>
+              <Button variant="outline" disabled={!pageCursors.length} onClick={() => movePage("previous")}>Sebelumnya</Button>
+              <Button variant="outline" disabled={!state.data.meta.next_cursor} onClick={() => movePage("next", state.data.meta.next_cursor ?? undefined)}>Berikutnya</Button>
             </div>
           )}
         </>
       )}
     </section>
   );
+}
+
+function CustomerSummaryCard({ item, onSelect }: { item: CustomerSummary | Schema["Customer"]; onSelect: (id: string) => void }) {
+  const { customer, outstanding, aging, exceptions } = unpackCustomer(item);
+  const amounts = [...(aging ?? []), exceptions?.toString()];
+  return <article className="customer-summary-card">
+    <div className="customer-summary-card-heading">
+      <button type="button" className="customer-summary-link" onClick={() => onSelect(customer.id)}><strong>{customer.name}</strong><span className="table-note">{customer.code ?? "Tanpa kode"} {!customer.is_active && " · Nonaktif"}</span></button>
+      <span><span className="table-note">Jumlah</span><strong>{outstanding === undefined ? "—" : formatRupiah(outstanding)}</strong></span>
+    </div>
+    <dl className="customer-aging-cards">
+      {agingLabels.map((label, index) => <div key={label}><dt>{label}</dt><dd>{amounts[index] === undefined ? "—" : formatRupiah(amounts[index]!)}</dd></div>)}
+    </dl>
+  </article>;
 }
 
 function CustomerDetail({ id, csrf, canWrite, canMerge, saleId, openSale, onSaved, onDataChanged, onMerged }: {
@@ -248,8 +280,8 @@ function CustomerDetail({ id, csrf, canWrite, canMerge, saleId, openSale, onSave
       </section>
       <SalesPanel customer={customer} csrf={csrf} canWrite={canWrite} owner={canMerge}
         saleId={saleId} onOpen={openSale} onPosted={reload} />
-      <PaymentsPanel customer={customer} csrf={csrf} canWrite={canWrite} owner={canMerge} onChanged={onDataChanged} />
-      <Ledger id={id} openSale={openSale} csrf={csrf} owner={canMerge} onChanged={onDataChanged} />
+      <PaymentsPanel customer={customer} csrf={csrf} canWrite={canWrite} onChanged={onDataChanged} />
+      <Ledger id={id} openSale={openSale} />
     </>
   );
 }

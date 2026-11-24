@@ -21,6 +21,7 @@
 | 12 | [ADR](docs/decisions/) | alasan dan konsekuensi keputusan final |
 | 13 | [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md) | urutan fase web-first, acceptance gate, dan acuan workbook |
 | 14 | [PROJECT_STATUS](docs/PROJECT_STATUS.md) | status aktual, fase berjalan, blocker, dan langkah berikut |
+| 15 | [UI_UX_PERFORMANCE_AUDIT](docs/UI_UX_PERFORMANCE_AUDIT.md) | temuan review frontend, route, pemisahan bundle, dan tindak lanjut pengukuran |
 
 ## Skill khusus repo
 
