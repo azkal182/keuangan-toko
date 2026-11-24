@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import {
   Users,
@@ -11,6 +11,7 @@ import {
   KeyRound,
   UserCog,
   ChevronRight,
+  ChevronDown,
   Home,
 } from "lucide-react";
 import type { Schema } from "../api";
@@ -37,9 +38,7 @@ export function AppShell({
   passwordChangeRequired?: boolean;
 }) {
   const location = useLocation();
-  const [loggingOut, setLoggingOut] = useState(false);
   const canWrite = session.user.role !== "viewer";
-  const roleConfig = roleLabels[session.user.role] ?? { label: session.user.role, variant: "secondary" as const };
 
   const getPageInfo = () => {
     if (location.pathname.startsWith("/reports/aging")) {
@@ -174,111 +173,58 @@ export function AppShell({
             )}
           </nav>
 
-          {/* Account Profile & Actions */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Link
-              to="/settings/account"
-              title="Pengaturan Kata Sandi & Akun"
-              className={`flex items-center gap-2.5 p-1.5 sm:px-2.5 sm:py-1 rounded-xl transition-all border ${
-                location.pathname.startsWith("/settings/account")
-                  ? "bg-emerald-50/80 border-emerald-300 ring-1 ring-emerald-300"
-                  : "bg-slate-50/70 border-slate-200 hover:bg-slate-100 hover:border-slate-300"
-              }`}
-            >
-              <div className="flex items-center justify-center h-7 w-7 rounded-lg bg-emerald-800 text-white font-bold text-xs shadow-2xs">
-                {session.user.username.slice(0, 1).toUpperCase()}
-              </div>
-              <div className="hidden sm:flex flex-col items-start leading-none gap-1">
-                <span className="text-xs font-bold text-slate-900">{session.user.username}</span>
-                <Badge variant={roleConfig.variant} className="text-[10px] py-0 px-1.5 h-3.5 font-medium">
-                  {roleConfig.label}
-                </Badge>
-              </div>
-              <KeyRound className="h-3.5 w-3.5 text-slate-400 hidden sm:block ml-1" />
-            </Link>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setLoggingOut(true);
-                onLogout();
-              }}
-              disabled={loggingOut}
-              className="gap-1.5 text-xs text-slate-700 hover:text-rose-700 hover:border-rose-300 hover:bg-rose-50"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{loggingOut ? "Keluar…" : "Keluar"}</span>
-            </Button>
-          </div>
+          {/* Avatar Dropdown for Account & Logout */}
+          <UserAvatarDropdown session={session} onLogout={onLogout} />
         </div>
 
-        {/* Mobile Navigation bar */}
-        <nav aria-label="Navigasi Mobile" className="flex md:hidden items-center justify-around gap-1 pt-2.5 mt-2.5 border-t border-slate-200">
-          {!passwordChangeRequired && (
-            <>
+        {/* Mobile Navigation bar: Spacious, only primary business modules */}
+        {!passwordChangeRequired && (
+          <nav aria-label="Navigasi Mobile" className="flex md:hidden items-center justify-around gap-2 pt-2.5 mt-2.5 border-t border-slate-200">
+            <NavLink
+              to="/customers"
+              className={({ isActive }) =>
+                `flex flex-1 items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isActive
+                    ? "bg-emerald-50 text-emerald-900 border border-emerald-200 shadow-2xs"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`
+              }
+            >
+              <Users className="h-4 w-4 text-emerald-700" />
+              <span>Pelanggan</span>
+            </NavLink>
+
+            <NavLink
+              to="/reports/aging"
+              className={({ isActive }) =>
+                `flex flex-1 items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isActive
+                    ? "bg-emerald-50 text-emerald-900 border border-emerald-200 shadow-2xs"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`
+              }
+            >
+              <Clock className="h-4 w-4 text-emerald-700" />
+              <span>Aging</span>
+            </NavLink>
+
+            {canWrite && (
               <NavLink
-                to="/customers"
+                to="/imports"
                 className={({ isActive }) =>
-                  `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${
-                    isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"
+                  `flex flex-1 items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    isActive
+                      ? "bg-emerald-50 text-emerald-900 border border-emerald-200 shadow-2xs"
+                      : "text-slate-600 hover:bg-slate-100"
                   }`
                 }
               >
-                <Users className="h-3.5 w-3.5" />
-                <span>Pelanggan</span>
+                <FileSpreadsheet className="h-4 w-4 text-emerald-700" />
+                <span>Import</span>
               </NavLink>
-              <NavLink
-                to="/reports/aging"
-                className={({ isActive }) =>
-                  `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${
-                    isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"
-                  }`
-                }
-              >
-                <Clock className="h-3.5 w-3.5" />
-                <span>Aging</span>
-              </NavLink>
-              {canWrite && (
-                <NavLink
-                  to="/imports"
-                  className={({ isActive }) =>
-                    `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${
-                      isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"
-                    }`
-                  }
-                >
-                  <FileSpreadsheet className="h-3.5 w-3.5" />
-                  <span>Import</span>
-                </NavLink>
-              )}
-              {session.user.role === "owner" && (
-                <NavLink
-                  to="/settings/users"
-                  className={({ isActive }) =>
-                    `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${
-                      isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"
-                    }`
-                  }
-                >
-                  <UserCog className="h-3.5 w-3.5" />
-                  <span>Pengguna</span>
-                </NavLink>
-              )}
-            </>
-          )}
-          <NavLink
-            to="/settings/account"
-            className={({ isActive }) =>
-              `flex flex-1 items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold ${
-                isActive ? "bg-emerald-50 text-emerald-900 border border-emerald-200" : "text-slate-600"
-              }`
-            }
-          >
-            <KeyRound className="h-3.5 w-3.5" />
-            <span>Akun</span>
-          </NavLink>
-        </nav>
+            )}
+          </nav>
+        )}
       </header>
 
       {/* Main Container */}
@@ -327,6 +273,144 @@ export function AppShell({
           <span className="font-mono text-[11px] text-slate-400">PostgreSQL · Axum · React</span>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function UserAvatarDropdown({
+  session,
+  onLogout,
+}: {
+  session: Schema["SessionDetails"];
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+
+  const roleConfig = roleLabels[session.user.role] ?? { label: session.user.role, variant: "secondary" as const };
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  // Close dropdown on route change
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((prev) => !prev)}
+        className={`flex items-center gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl transition-all border cursor-pointer select-none ${
+          open
+            ? "bg-emerald-50 border-emerald-300 ring-2 ring-emerald-600/20"
+            : "bg-slate-50/80 border-slate-200 hover:bg-slate-100 hover:border-slate-300 shadow-2xs"
+        }`}
+      >
+        <div className="flex items-center justify-center h-7 w-7 rounded-lg bg-gradient-to-br from-[#0f4c3a] to-[#0a3528] text-white font-bold text-xs shadow-2xs">
+          {session.user.username.slice(0, 1).toUpperCase()}
+        </div>
+        <div className="hidden sm:flex flex-col items-start leading-none gap-0.5">
+          <span className="text-xs font-bold text-slate-900">{session.user.username}</span>
+          <Badge variant={roleConfig.variant} className="text-[10px] py-0 px-1.5 h-3.5 font-medium">
+            {roleConfig.label}
+          </Badge>
+        </div>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-150 ${
+            open ? "rotate-180 text-emerald-800" : ""
+          }`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl ring-1 ring-black/5 z-50 animate-in fade-in zoom-in-95 duration-100">
+          {/* User profile overview */}
+          <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5">
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center justify-center h-9 w-9 rounded-xl bg-gradient-to-br from-emerald-800 to-emerald-950 text-white font-bold text-xs shadow-2xs">
+                {session.user.username.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-bold text-slate-900 truncate">{session.user.username}</span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <Badge variant={roleConfig.variant} className="text-[10px] py-0 px-1.5 h-3.5 font-medium">
+                    {roleConfig.label}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Menu items */}
+          <div className="space-y-0.5">
+            <Link
+              to="/settings/account"
+              onClick={() => setOpen(false)}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                location.pathname.startsWith("/settings/account")
+                  ? "bg-emerald-50 text-emerald-900 font-semibold"
+                  : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <KeyRound className="h-4 w-4 text-emerald-700" />
+              <span>Ganti Kata Sandi & Akun</span>
+            </Link>
+
+            {session.user.role === "owner" && (
+              <Link
+                to="/settings/users"
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  location.pathname.startsWith("/settings/users")
+                    ? "bg-emerald-50 text-emerald-900 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                <UserCog className="h-4 w-4 text-emerald-700" />
+                <span>Manajemen Pengguna</span>
+              </Link>
+            )}
+          </div>
+
+          <div className="my-1.5 border-t border-slate-100" />
+
+          <button
+            type="button"
+            disabled={loggingOut}
+            onClick={() => {
+              setLoggingOut(true);
+              onLogout();
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-rose-700 hover:bg-rose-50 hover:text-rose-900 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4 text-rose-600" />
+            <span>{loggingOut ? "Mengeluarkan sesi…" : "Keluar (Logout)"}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
