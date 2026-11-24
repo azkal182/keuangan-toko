@@ -1,0 +1,5 @@
+[package]
+name = "toko-money"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true

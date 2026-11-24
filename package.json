@@ -1,0 +1,15 @@
+{
+  "name": "keuangan-toko",
+  "private": true,
+  "packageManager": "pnpm@12.21.0",
+  "engines": {
+    "node": "26.13.1"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @toko/web dev",
+    "typecheck": "pnpm --filter @toko/api-client typecheck && pnpm --filter @toko/web typecheck",
+    "build": "pnpm --filter @toko/web build",
+    "api:generate": "cargo run --quiet --locked -p toko-contracts --bin export-openapi | pnpm --filter @toko/api-client generate",
+    "api:check": "cargo run --quiet --locked -p toko-contracts --bin export-openapi | pnpm --filter @toko/api-client check-generated"
+  }
+}

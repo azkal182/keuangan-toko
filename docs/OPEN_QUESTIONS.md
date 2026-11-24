@@ -1,0 +1,35 @@
+# Register Keputusan — Keuangan Toko
+
+**Status:** OQ-01–24 telah diputuskan atau dijadwalkan sebagai eksekusi fase. OQ-22–24 dibuka pada 24 November 2026 berdasarkan arahan Owner untuk import workbook dan pembuatan pelanggan baru.
+**Otorisasi:** keputusan final di bawah mengikuti delegasi pengguna pada 23 November 2026 agar dokumen diputuskan dan difinalkan. Detail ada di [ADR-007](decisions/ADR-007-mvp-and-operating-policies.md); ERD di [ERD.md](ERD.md).
+
+| ID | Status | Keputusan ringkas | Eksekusi / rujukan |
+|---|---|---|---|
+| OQ-01 | Diputuskan | MVP piutang: pelanggan, penjualan kredit, pembayaran, laporan; POS tunai dikecualikan. | ADR-007 §01; PH-03 |
+| OQ-02 | Diputuskan | Metode pembayaran `cash` dan `bank_transfer`; QRIS yang settle ke rekening dicatat transfer. | ADR-007 §02; API-301 |
+| OQ-03 | Diputuskan | FIFO pada debit terbuka tertua saat pembayaran, tanggal usaha → `posted_at` → UUID; import mengikuti urutan sheet/baris. Tidak ada reallocation otomatis atas transaksi backdated. | ADR-007 §03; PH-04/06 |
+| OQ-04 | Diputuskan | Surplus menjadi kredit pelanggan, tanpa auto-apply; pemakaian berikutnya eksplisit dan diaudit. | ADR-007 §04; PH-04 |
+| OQ-05 | Diputuskan | Ledger IDR `BIGINT`, API nominal string digit; quantity decimal 3; unit price integer IDR; half-up per item; diskon di luar MVP. | ADR-007 §05; ERD |
+| OQ-06 | Diputuskan | Data tanggal/identitas/amount anomali dikarantina; override/split manual Owner dengan alasan dan provenance. | ADR-007 §06; PH-06 |
+| OQ-07 | Diputuskan | Satu baris historis menjadi satu event; partial commit baris yang disetujui boleh dengan daftar pengecualian; commit pilihan atomik. | ADR-007 §07; ERD |
+| OQ-08 | Diputuskan | Zona usaha Asia/Jakarta; tanggal usaha terpisah dari timestamp UTC; future date ditolak; backdate Owner dengan alasan. | ADR-007 §08 |
+| OQ-09 | Diputuskan | Auth lokal username/password; role owner/operator/viewer; sesi server-side cookie aman; password Argon2id; akses diuji API. | ADR-007 §09; AUTHORIZATION_MATRIX; SECURITY |
+| OQ-10 | Diputuskan | UUID internal; kode pelanggan opsional unik setelah normalisasi; nama wajib; merge duplikat hanya Owner dengan audit. | ADR-007 §10; DATA_DICTIONARY; ERD |
+| OQ-11 | Diputuskan | Sale draft→posted; payment posted setelah konfirmasi; posting immutable; koreksi hanya reversal Owner dengan alasan. | ADR-007 §11; PH-03/04/07 |
+| OQ-12 | Diputuskan | Aging dari tanggal usaha tanpa due date; bucket Excel tetap; unknown/future tampil sebagai exception dan tetap diperhitungkan. | ADR-007 §12; PH-05 |
+| OQ-13 | Diputuskan | Owner menyetujui; valid rows boleh partial commit dengan preview pengecualian; variance harus nol atau disetujui eksplisit bernilai dan beralasan. | ADR-007 §13; PH-06 |
+| OQ-14 | Diputuskan, eksekusi PH-09 | Multi-user online; satu device offline writer per toko; konflik manual, bukan last-write-wins. | ADR-007 §14; PH-09 |
+| OQ-15 | Diputuskan, eksekusi PH-09 | Device provisioning online; offline auth maks 72 jam; SQLCipher + key DPAPI; offline admin/import/reversal dilarang. | ADR-007 §15; PH-09 |
+| OQ-16 | Diputuskan | REST `/api/v1`, JSON envelope, UUID, string money/quantity, cursor limit 50/100, idempotency untuk mutasi finansial/import. | ADR-007 §16; API_SPEC |
+| OQ-17 | Diputuskan | Repo root dan rencana fase di repo ini; ERD resmi dibuat di `docs/ERD.md`. | ADR-007 §17; PH-00 |
+| OQ-18 | Diputuskan | Klasifikasi internal-konfidensial; retensi ledger/audit 10 tahun minimum; raw workbook 30 hari pasca batch final, abandoned staging 90 hari; log redacted 90 hari; backup encrypted. | ADR-007 §18; SECURITY/OPERATIONS |
+| OQ-19 | Diputuskan, provider PH-08 | Linux containers; target Indonesia; GitHub Actions default; provider deployment dipilih berdasarkan biaya pada PH-08; RPO 24 jam/RTO 8 jam. | ADR-007 §19; OPERATIONS |
+| OQ-20 | Diputuskan, benchmark PH-09 | Desktop Windows 11 x64; printer out of scope; hardware minimum diuji pada perangkat target saat PH-09. | ADR-007 §20; PH-09 |
+| OQ-21 | Diputuskan | Bahasa Indonesia; Chrome/Edge dua versi stable terbaru; 1024×768; WCAG 2.2 AA; P95 API 500 ms pada 50 concurrent users dan 100.000 ledger rows; flow utama 2 s; workbook 25 MiB/25k rows. | ADR-007 §21; QUALITY |
+| OQ-22 | Diputuskan pengguna, implementasi PH-06 | Owner meninjau preview batch; kode ternormalisasi dicocokkan lebih dulu; jika tidak ada match, nama ternormalisasi unik dapat mencocokkan pelanggan yang sudah ada atau dibuat baru saat commit. Nama/kode hilang atau ambigu tetap perlu mapping manual/karantina. Baris bermasalah tetap karantina; satu baris sumber tetap maksimal satu event; commit atomik menerima seluruh baris yang disetujui dengan daftar pengecualian. Normalisasi nama: Unicode case-fold, trim, dan whitespace berurutan menjadi satu spasi. | Pilihan pengguna 24 November 2026; amendemen ADR-007 §§06/07/10/13; perubahan API dan PH-06 implementasi berjalan. |
+| OQ-23 | Diputuskan pengguna, implementasi PH-06 | Sumber adalah setiap sheet pelanggan bernama (nama B2, kode B1), bukan `Analisa`. Agregasi manual dari transaksi tiap sheet; gunakan debit literal F atau, jika F formula/kosong, hitung qty D × harga E dengan rounding half-up; kredit hanya dari nilai literal G. Abaikan saldo formula/aging. Baris tanggal/amount formula atau invalid dikarantina; sheet tanpa nama dilewati. | Klarifikasi terbaru pengguna 24 November 2026 menggantikan opsi awal cached balance `Analisa`; amendemen ADR-007 §§05/07/13, implementasi parser dan summary PH-06. |
+| OQ-24 | Diputuskan pengguna, implementasi PH-06 | Pada setiap sheet pelanggan, tanggal transaksi yang kosong mewarisi tanggal valid terakhir pada sheet yang sama (forward-fill, termasuk beberapa baris kosong berurutan). Tanggal yang diwariskan ditandai di review. Jika belum ada tanggal valid sebelumnya, atau sel tanggal sendiri berisi nilai invalid/formula, baris dikarantina. Tanggal invalid/future tidak menjadi sumber warisan baru; tanggal valid terakhir sebelumnya tetap dipakai. | Arahan pengguna 24 November 2026; amendemen ADR-007 §06; issue code `inherited_previous_date`. |
+
+## Tata kelola perubahan
+
+Temuan kebijakan baru dicatat sebagai OQ baru atau perubahan ADR oleh pengguna; agent tidak mengubah keputusan final tanpa instruksi. Item yang dijadwalkan ke PH-08/PH-09 adalah detail eksekusi terukur, bukan kebijakan yang masih belum diputuskan. Vendor cloud, kredensial, domain, dan secret sengaja tidak ditentukan dalam dokumen; pemilihan vendor dilakukan pada PH-08.
