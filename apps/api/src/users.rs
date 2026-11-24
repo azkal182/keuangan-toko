@@ -386,7 +386,7 @@ pub async fn change_password(
         move || {
             use argon2::{
                 Argon2,
-                password_hash::{PasswordHash, PasswordVerifier},
+                password_hash::{PasswordVerifier, phc::PasswordHash},
             };
             PasswordHash::new(&old_hash).is_ok_and(|parsed| {
                 Argon2::default()

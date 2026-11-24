@@ -40,7 +40,6 @@ pub struct PageMeta {
 #[openapi(
     info(title = "Keuangan Toko API", version = "1"),
     paths(auth::get_me, auth::login, auth::logout,
-          users::change_password,
           customers::list_customers, customers::create_customer, customers::get_customer,
           customers::update_customer, customers::merge_customer, customers::list_ledger,
           sales::create_sale, sales::update_sale, sales::post_sale, sales::get_sale,
