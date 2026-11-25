@@ -1402,31 +1402,58 @@ pub async fn commit_batch(
             .map_err(|error| commit_db_failure(request, "update_import_rows", error))?;
     }
     let mut open_debits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
+    let mut open_credits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
     let mut legacy_allocations = Vec::<PreparedLegacyAllocation>::new();
     for entry in &committed {
         if entry.debit > 0 {
-            open_debits
-                .entry(entry.customer_id)
-                .or_default()
-                .push_back((entry.ledger_id, entry.debit));
-        } else {
-            let mut remaining = entry.credit;
-            if let Some(debits) = open_debits.get_mut(&entry.customer_id) {
-                while remaining > 0 {
-                    let Some((debit_id, open)) = debits.pop_front() else {
+            let mut remaining_debit = entry.debit;
+            if let Some(credits) = open_credits.get_mut(&entry.customer_id) {
+                while remaining_debit > 0 {
+                    let Some((payment_id, open_credit)) = credits.pop_front() else {
                         break;
                     };
-                    let allocation = remaining.min(open);
+                    let allocation = remaining_debit.min(open_credit);
+                    legacy_allocations.push(PreparedLegacyAllocation {
+                        payment_entry_id: payment_id,
+                        debit_entry_id: entry.ledger_id,
+                        amount: allocation,
+                    });
+                    remaining_debit -= allocation;
+                    if open_credit > allocation {
+                        credits.push_front((payment_id, open_credit - allocation));
+                    }
+                }
+            }
+            if remaining_debit > 0 {
+                open_debits
+                    .entry(entry.customer_id)
+                    .or_default()
+                    .push_back((entry.ledger_id, remaining_debit));
+            }
+        } else {
+            let mut remaining_credit = entry.credit;
+            if let Some(debits) = open_debits.get_mut(&entry.customer_id) {
+                while remaining_credit > 0 {
+                    let Some((debit_id, open_debit)) = debits.pop_front() else {
+                        break;
+                    };
+                    let allocation = remaining_credit.min(open_debit);
                     legacy_allocations.push(PreparedLegacyAllocation {
                         payment_entry_id: entry.ledger_id,
                         debit_entry_id: debit_id,
                         amount: allocation,
                     });
-                    remaining -= allocation;
-                    if open > allocation {
-                        debits.push_front((debit_id, open - allocation));
+                    remaining_credit -= allocation;
+                    if open_debit > allocation {
+                        debits.push_front((debit_id, open_debit - allocation));
                     }
                 }
+            }
+            if remaining_credit > 0 {
+                open_credits
+                    .entry(entry.customer_id)
+                    .or_default()
+                    .push_back((entry.ledger_id, remaining_credit));
             }
         }
     }

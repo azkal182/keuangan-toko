@@ -168,7 +168,7 @@ pub async fn list(
                      ELSE coalesce(payment_alloc.amount,0)::text END AS allocated_idr,
                 e.balance::text AS running_balance_idr,
                 CASE WHEN e.debit_idr > 0 THEN greatest(e.debit_idr::numeric-coalesce(debit_alloc.amount,0),0)::text ELSE '0' END AS remaining_idr,
-                CASE WHEN e.debit_idr > 0 AND e.effective_date IS NOT NULL THEN ((now() AT TIME ZONE 'Asia/Jakarta')::date-e.effective_date)::int END AS age_days,
+                CASE WHEN e.debit_idr > 0 AND (e.debit_idr::numeric - coalesce(debit_alloc.amount,0)) > 0 AND e.effective_date IS NOT NULL THEN ((now() AT TIME ZONE 'Asia/Jakarta')::date-e.effective_date)::int END AS age_days,
                 CASE WHEN e.debit_idr > 0 THEN
                     CASE WHEN debit_alloc.amount = 0 THEN 'unallocated'
                           WHEN debit_alloc.amount = e.debit_idr THEN 'allocated' ELSE 'partially_allocated' END

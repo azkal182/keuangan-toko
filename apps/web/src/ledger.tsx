@@ -234,10 +234,12 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
                           </td>
 
                           <td className="p-3 pr-6 text-right font-mono text-[11px] whitespace-nowrap">
-                            {entry.age_days == null
-                              ? entry.debit_idr === "0"
-                                ? "—"
-                                : <span className="text-purple-700">Tgl tidak diketahui</span>
+                            {BigInt(entry.debit_idr) === 0n
+                              ? "—"
+                              : BigInt(entry.remaining_idr) === 0n
+                              ? <span className="inline-flex items-center text-emerald-700 font-semibold text-[10px] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Lunas</span>
+                              : entry.age_days == null
+                              ? <span className="text-purple-700">Tgl tidak diketahui</span>
                               : entry.age_days < 0
                               ? <span className="text-purple-700">Masa depan</span>
                               : entry.age_days > 60
