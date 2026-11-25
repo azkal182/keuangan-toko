@@ -191,42 +191,6 @@ pub async fn post(
          VALUES ($1, $2, 'credit_sale', $3, $4, $5, $6, $7)",
     ).bind(entry).bind(current.customer_id).bind(id).bind(current.effective_date).bind(current.total_idr)
         .bind(session.user_id).bind(posted_at).execute(&mut *tx).await.map_err(|_| request.internal())?;
-
-    let open_payments: Vec<(Uuid, i64)> = sqlx::query_as(
-        "SELECT p.id, (p.amount_idr - coalesce(sum(a.amount_idr), 0))::bigint AS unallocated_idr
-         FROM payments p
-         LEFT JOIN payment_allocations a ON a.payment_id = p.id AND a.status = 'active'
-         WHERE p.customer_id = $1 AND p.status = 'posted'
-         GROUP BY p.id, p.amount_idr, p.received_date, p.posted_at
-         HAVING (p.amount_idr - coalesce(sum(a.amount_idr), 0)) > 0
-         ORDER BY p.received_date ASC, p.posted_at ASC, p.id ASC",
-    )
-    .bind(current.customer_id)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(|_| request.internal())?;
-
-    let mut remaining_debt = current.total_idr;
-    for (payment_id, unallocated_idr) in open_payments {
-        if remaining_debt <= 0 {
-            break;
-        }
-        let allocation = remaining_debt.min(unallocated_idr);
-        sqlx::query(
-            "INSERT INTO payment_allocations (id, payment_id, debit_entry_id, amount_idr, status, created_by)
-             VALUES ($1, $2, $3, $4, 'active', $5)",
-        )
-        .bind(Uuid::new_v4())
-        .bind(payment_id)
-        .bind(entry)
-        .bind(allocation)
-        .bind(session.user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| request.internal())?;
-        remaining_debt -= allocation;
-    }
-
     let audit_reason = current.backdate_reason.filter(|_| backdated);
     sqlx::query(
         "INSERT INTO audit_events (id, actor_id, action, entity_type, entity_id, reason, request_id, metadata)
