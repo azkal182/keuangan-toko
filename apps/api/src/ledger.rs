@@ -124,6 +124,14 @@ pub async fn list(
     Params(query): Params<LedgerQuery>,
 ) -> Result<Json<LedgerResponse>, Failure> {
     let (limit, cursor) = customers::pagination(request, query.limit, query.cursor.as_deref())?;
+    let is_desc = match query.order.as_deref() {
+        Some(s) if s.eq_ignore_ascii_case("desc") => true,
+        Some(s) if s.eq_ignore_ascii_case("asc") => false,
+        None => false,
+        Some(_) => {
+            return Err(request.invalid("order", "Urutan harus 'asc' atau 'desc'"));
+        }
+    };
     if let (Some(from), Some(to)) = (query.from, query.to)
         && from > to
     {
@@ -152,13 +160,16 @@ pub async fn list(
              SELECT e.*, row_number() OVER history AS position,
                     sum(e.debit_idr::numeric - e.credit_idr::numeric) OVER history AS balance
              FROM receivable_entries e WHERE e.customer_id = $1
-             WINDOW history AS (ORDER BY e.effective_date NULLS LAST, e.created_at, e.id)
+             WINDOW history AS (ORDER BY e.effective_date NULLS LAST, e.source_order NULLS LAST, e.created_at, e.id)
          ), page AS (
              SELECT * FROM ordered
-             WHERE ($2::uuid IS NULL OR position > (SELECT position FROM ordered WHERE id = $2))
+             WHERE ($2::uuid IS NULL OR (
+                    CASE WHEN $6 = true THEN position < (SELECT position FROM ordered WHERE id = $2)
+                         ELSE position > (SELECT position FROM ordered WHERE id = $2) END
+                   ))
                AND ($3::date IS NULL OR effective_date >= $3)
                AND ($4::date IS NULL OR effective_date <= $4)
-             ORDER BY position LIMIT $5
+             ORDER BY CASE WHEN $6 = true THEN -position ELSE position END LIMIT $5
          )
          SELECT e.id, e.entry_type, e.source_id, EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id=e.id) AS is_reversed, e.effective_date, coalesce(s.reference_no, p.reference) AS reference, coalesce(e.description,item.description,p.note) AS description,
                 coalesce(e.quantity,item.quantity::text) AS quantity, coalesce(e.unit_price_idr,item.unit_price_idr)::text AS unit_price_idr,
@@ -199,8 +210,8 @@ pub async fn list(
              SELECT coalesce(sum(a.amount_idr),0) AS amount FROM legacy_credit_allocations a
              WHERE a.payment_entry_id=e.id AND a.status='active'
          ) legacy_payment_alloc ON e.entry_type='legacy_payment'
-         ORDER BY e.position",
-    ).bind(id).bind(cursor).bind(query.from).bind(query.to).bind(i64::from(limit) + 1)
+         ORDER BY CASE WHEN $6 = true THEN -e.position ELSE e.position END",
+    ).bind(id).bind(cursor).bind(query.from).bind(query.to).bind(i64::from(limit) + 1).bind(is_desc)
         .fetch_all(&mut *tx).await.map_err(|_| request.internal())?;
     let next_cursor = customers::trim_page(&mut entries, limit, |entry| entry.id);
     let summary = summary(&mut tx, id, request).await?;

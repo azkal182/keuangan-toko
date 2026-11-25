@@ -1,4 +1,4 @@
-import { formatRupiah } from "../money";
+import { formatAccountingRupiah } from "../money";
 
 export function MoneyDisplay({
   amount,
@@ -16,7 +16,7 @@ export function MoneyDisplay({
   }
 
   const strAmount = String(amount);
-  const formatted = formatRupiah(strAmount);
+  const formatted = formatAccountingRupiah(strAmount);
 
   const sizeClasses = {
     xs: "text-xs",

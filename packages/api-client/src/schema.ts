@@ -827,6 +827,8 @@ export interface components {
              * @default 50
              */
             limit?: number | null;
+            /** @default desc */
+            order?: string | null;
             /** Format: date */
             to?: string | null;
         };
@@ -2085,6 +2087,7 @@ export interface operations {
                 limit?: number;
                 from?: string;
                 to?: string;
+                order?: string;
             };
             header?: never;
             path: {

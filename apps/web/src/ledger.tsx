@@ -7,7 +7,7 @@ import { Input } from "./components/ui/input";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { MoneyDisplay } from "./components/money-display";
-import { formatRupiah, formatQuantity } from "./money";
+import { formatRupiah, formatAccountingRupiah, formatQuantity } from "./money";
 
 const businessDate = new Intl.DateTimeFormat("id-ID", {
   day: "numeric",
@@ -34,21 +34,19 @@ export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) =
     async (signal: AbortSignal) =>
       readResult(
         await api.GET("/api/v1/customers/{id}/ledger", {
-          params: { path: { id }, query: { from: query.from, to: query.to, cursor } },
+          params: { path: { id }, query: { from: query.from, to: query.to, cursor, order: sortOrder } },
           signal,
         }),
       ),
-    [id, query, cursor],
+    [id, query, cursor, sortOrder],
   );
 
   const { state, reload } = useResource(load);
 
   const displayEntries = useMemo(() => {
     if (state.status !== "ready") return [];
-    return sortOrder === "desc"
-      ? [...state.data.data.entries].reverse()
-      : state.data.data.entries;
-  }, [state, sortOrder]);
+    return state.data.data.entries;
+  }, [state]);
 
   return (
     <Card className="border-slate-200/90 shadow-2xs">
@@ -136,7 +134,12 @@ export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) =
               <div className="flex items-center gap-1 bg-slate-200/80 p-0.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
                 <button
                   type="button"
-                  onClick={() => setSortOrder("desc")}
+                  onClick={() => {
+                    if (sortOrder !== "desc") {
+                      setSortOrder("desc");
+                      setQuery((q) => ({ ...q, cursors: [] }));
+                    }
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     sortOrder === "desc"
                       ? "bg-white text-emerald-950 shadow-xs"
@@ -147,7 +150,12 @@ export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) =
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSortOrder("asc")}
+                  onClick={() => {
+                    if (sortOrder !== "asc") {
+                      setSortOrder("asc");
+                      setQuery((q) => ({ ...q, cursors: [] }));
+                    }
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                     sortOrder === "asc"
                       ? "bg-white text-emerald-950 shadow-xs"
@@ -253,8 +261,8 @@ export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) =
                             {isCredit ? formatRupiah(entry.credit_idr) : "—"}
                           </td>
 
-                          <td className="p-3 text-right font-mono tabular-nums font-bold text-slate-900 bg-slate-50/40">
-                            {formatRupiah(entry.running_balance_idr)}
+                          <td className={`p-3 text-right font-mono tabular-nums font-bold ${BigInt(entry.running_balance_idr) < 0n ? "text-rose-700 bg-rose-50/30" : "text-slate-900 bg-slate-50/40"}`}>
+                            {formatAccountingRupiah(entry.running_balance_idr)}
                           </td>
 
                           {/* Kolom Lunas (Status) - Persis seperti Excel Gambar 1 */}

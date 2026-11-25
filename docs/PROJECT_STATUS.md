@@ -46,7 +46,10 @@ Implementasi rekomendasi audit pada kasus anomali umur piutang dan deposit yang 
 3. `apps/api/src/imports.rs`: Menerapkan *Two-Way FIFO Allocation Engine* dengan antrean `open_debits` dan `open_credits`, memastikan pembayaran awal (uang muka/deposit) di sheet Excel otomatis menyerap baris-baris belanja debit berikutnya.
 4. `apps/web/src/components/record-sale-dialog.tsx` & `apps/web/src/customers.tsx`: Menyediakan dialog instan multi-item untuk belanja pelanggan pada tanggal yang sama, langsung tercatat per item ke Buku Piutang tanpa langkah faktur/posting terpisah. Tab Penjualan Kredit di detail pelanggan ditiadakan sehingga tersisa Buku Piutang dan Riwayat Pembayaran.
 5. Format kuantitas disesuaikan tanpa desimal palsu (`5` alih-alih `5.000`), kolom Buku Piutang diselaraskan persis seperti format Excel pengguna (Lunas cyan badge vs Belum red badge, Sisa rupiah, Umur Piutang `60 > Hari`, serta opsi toggle pengurutan Terbaru di Atas / Terlama di Atas).
-6. Verifikasi: `cargo check --workspace --locked`, `cargo clippy --workspace --locked`, `cargo test --workspace --locked` (6 tests passed), `pnpm typecheck`, dan `pnpm build` berhasil.
+6. `apps/api/src/imports.rs`: Formula evaluation diizinkan untuk kolom Qty, Harga, Debet, dan Kredit (mengambil nilai kalkulasi `raw_value` yang tersimpan di Excel, misal `=2*5000` -> 10.000), hanya mengabaikan formula pada kolom Saldo (H) yang dihitung oleh ledger sistem.
+7. `apps/api/src/ledger.rs` & `crates/contracts/src/customers.rs`: Penambahan server-side sorting `order=desc|asc` dengan tie-breaker `source_order` di ledger, memastikan opsi 'Terbaru di Atas' langsung mengambil transaksi paling mutakhir dari database dan item pada tanggal yang sama urut persis seperti Excel.
+8. Format akuntansi saldo negatif: Saldo berjalan negatif dan angka minus otomatis ditampilkan dalam format kurung `(Rp ...)` selaras dengan format Excel toko.
+9. Verifikasi: `cargo check --workspace --locked`, `cargo clippy --workspace --locked` (0 warning), `cargo test --workspace --locked` (semua unit test passed), `pnpm api:generate`, `pnpm typecheck`, dan `pnpm build` berhasil.
 
 ## Bukti exit gate PH-00
 

@@ -123,6 +123,8 @@ pub struct LedgerQuery {
     pub limit: Option<u32>,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
+    #[schema(pattern = "^(asc|desc)$", default = "desc")]
+    pub order: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

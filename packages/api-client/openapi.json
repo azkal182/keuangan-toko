@@ -1364,6 +1364,14 @@
               "type": "string",
               "format": "date"
             }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4855,6 +4863,14 @@
             "default": 50,
             "maximum": 100,
             "minimum": 1
+          },
+          "order": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": "desc",
+            "pattern": "^(asc|desc)$"
           },
           "to": {
             "type": [

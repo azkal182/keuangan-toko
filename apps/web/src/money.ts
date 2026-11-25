@@ -8,6 +8,16 @@ export function formatRupiah(amount: string) {
   return rupiah.format(BigInt(amount));
 }
 
+export function formatAccountingRupiah(amount: string | bigint | number | undefined | null): string {
+  if (amount === undefined || amount === null || amount === "") return "—";
+  const str = String(amount);
+  if (str.startsWith("-")) {
+    const positive = str.slice(1);
+    return `(${formatRupiah(positive)})`;
+  }
+  return formatRupiah(str);
+}
+
 export function formatQuantity(qty: string | null | undefined): string {
   if (!qty) return "—";
   const num = parseFloat(qty);
