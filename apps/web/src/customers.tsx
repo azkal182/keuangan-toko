@@ -24,6 +24,7 @@ import { Dialog } from "./components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { MoneyDisplay } from "./components/money-display";
 import { formatRupiah } from "./money";
+import { RecordSaleDialog } from "./components/record-sale-dialog";
 
 const SalesPanel = lazy(() => import("./sales").then((module) => ({ default: module.SalesPanel })));
 const PaymentsPanel = lazy(() => import("./payments").then((module) => ({ default: module.PaymentsPanel })));
@@ -598,6 +599,7 @@ function CustomerDetailRoute({
           })
         }
         onDataChanged={onChanged}
+        onNotice={onNotice}
         onSaved={() => {
           onChanged();
           onNotice("Perubahan data pelanggan berhasil disimpan.");
@@ -622,24 +624,22 @@ function CustomerDetail({
   onSaved,
   onDataChanged,
   onMerged,
+  onNotice,
 }: {
   id: string;
   csrf: string;
   canWrite: boolean;
   canMerge: boolean;
   saleId?: string;
-  openSale: (id?: string) => void;
+  openSale?: (id?: string) => void;
   onSaved: () => void;
   onDataChanged: () => void;
   onMerged: (id: string) => void;
+  onNotice?: (message: string) => void;
 }) {
   const [mode, setMode] = useState<"view" | "edit" | "merge">("view");
-  const [activeTab, setActiveTab] = useState<"ledger" | "sales" | "payments">("ledger");
-
-  // Automatically switch to sales tab if saleId is present in URL
-  useEffect(() => {
-    if (saleId) setActiveTab("sales");
-  }, [saleId]);
+  const [activeTab, setActiveTab] = useState<"ledger" | "payments">("ledger");
+  const [recordSaleOpen, setRecordSaleOpen] = useState(false);
 
   const load = useCallback(
     async (signal: AbortSignal) =>
@@ -711,6 +711,16 @@ function CustomerDetail({
             {/* Quick Actions */}
             {mode === "view" && (canWrite || canMerge) && (
               <div className="flex items-center gap-2">
+                {canWrite && (
+                  <Button
+                    size="sm"
+                    onClick={() => setRecordSaleOpen(true)}
+                    className="gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xs text-xs font-semibold"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Catat Belanja</span>
+                  </Button>
+                )}
                 {canWrite && (
                   <Button
                     variant="outline"
@@ -816,37 +826,32 @@ function CustomerDetail({
       <Tabs
         value={activeTab}
         onValueChange={(val) => {
-          setActiveTab(val as "ledger" | "sales" | "payments");
-          if (saleId && val !== "sales") openSale(undefined);
+          setActiveTab(val as "ledger" | "payments");
         }}
       >
-        <TabsList className="bg-slate-200/70 p-1 rounded-xl">
-          <TabsTrigger value="ledger" className="gap-2 text-xs">
-            <span>Buku Piutang</span>
-          </TabsTrigger>
-          <TabsTrigger value="sales" className="gap-2 text-xs">
-            <span>Penjualan Kredit</span>
-            {saleId && <Badge variant="warning" className="text-[10px] py-0 px-1">Terbuka</Badge>}
-          </TabsTrigger>
-          <TabsTrigger value="payments" className="gap-2 text-xs">
-            <span>Riwayat Pembayaran</span>
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+          <TabsList className="bg-slate-200/70 p-1 rounded-xl">
+            <TabsTrigger value="ledger" className="gap-2 text-xs">
+              <span>Buku Piutang</span>
+            </TabsTrigger>
+            <TabsTrigger value="payments" className="gap-2 text-xs">
+              <span>Riwayat Pembayaran</span>
+            </TabsTrigger>
+          </TabsList>
+
+          {canWrite && (
+            <Button
+              onClick={() => setRecordSaleOpen(true)}
+              className="gap-2 shadow-2xs text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Catat Belanja / Piutang</span>
+            </Button>
+          )}
+        </div>
 
         <TabsContent value="ledger">
-          <Ledger id={id} openSale={(sId) => { openSale(sId); setActiveTab("sales"); }} />
-        </TabsContent>
-
-        <TabsContent value="sales">
-          <SalesPanel
-            customer={customer}
-            csrf={csrf}
-            canWrite={canWrite}
-            owner={canMerge}
-            saleId={saleId}
-            onOpen={openSale}
-            onPosted={reload}
-          />
+          <Ledger id={id} />
         </TabsContent>
 
         <TabsContent value="payments">
@@ -854,10 +859,28 @@ function CustomerDetail({
             customer={customer}
             csrf={csrf}
             canWrite={canWrite}
-            onChanged={onDataChanged}
+            onChanged={() => {
+              reload();
+              onDataChanged();
+            }}
           />
         </TabsContent>
       </Tabs>
+
+      {/* Instant Multi-item Sale Dialog */}
+      {canWrite && (
+        <RecordSaleDialog
+          open={recordSaleOpen}
+          onOpenChange={setRecordSaleOpen}
+          customer={customer}
+          csrf={csrf}
+          onSuccess={(msg) => {
+            reload();
+            onDataChanged();
+            onNotice?.(msg);
+          }}
+        />
+      )}
     </div>
   );
 }

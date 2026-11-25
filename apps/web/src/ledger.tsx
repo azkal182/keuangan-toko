@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Calendar, Filter, FileText, ArrowRight, RotateCcw } from "lucide-react";
 import { api, readResult, useResource, type Schema } from "./api";
 import { ErrorNotice } from "./components/presentation";
@@ -7,7 +7,7 @@ import { Input } from "./components/ui/input";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { MoneyDisplay } from "./components/money-display";
-import { formatRupiah } from "./money";
+import { formatRupiah, formatQuantity } from "./money";
 
 const businessDate = new Intl.DateTimeFormat("id-ID", {
   day: "numeric",
@@ -25,8 +25,9 @@ const entryLabels: Record<string, string> = {
   reversal: "Pembalikan",
 };
 
-export function Ledger({ id, openSale }: { id: string; openSale: (id: string) => void }) {
+export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) => void }) {
   const [query, setQuery] = useState<{ from?: string; to?: string; cursors: string[] }>({ cursors: [] });
+  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const cursor = query.cursors.at(-1);
 
   const load = useCallback(
@@ -41,6 +42,13 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
   );
 
   const { state, reload } = useResource(load);
+
+  const displayEntries = useMemo(() => {
+    if (state.status !== "ready") return [];
+    return sortOrder === "desc"
+      ? [...state.data.data.entries].reverse()
+      : state.data.data.entries;
+  }, [state, sortOrder]);
 
   return (
     <Card className="border-slate-200/90 shadow-2xs">
@@ -111,8 +119,8 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
 
         {state.status === "ready" && (
           <>
-            {/* Ledger Balance Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 px-6 bg-slate-50/80 border-b border-slate-100 gap-2">
+            {/* Ledger Balance Banner & Sorting Controls */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 px-6 bg-slate-50/80 border-b border-slate-100 gap-3">
               <div className="flex items-baseline gap-2">
                 <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
                   Saldo Bersih Buku Piutang:
@@ -123,12 +131,35 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
                   variant={BigInt(state.data.data.summary.ledger_balance_idr) > 0n ? "danger" : "success"}
                 />
               </div>
-              <span className="text-xs text-slate-500">
-                Menampilkan transaksi urut waktu (chronological order)
-              </span>
+
+              {/* Sorting Toggle Buttons */}
+              <div className="flex items-center gap-1 bg-slate-200/80 p-0.5 rounded-xl border border-slate-200 text-xs shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setSortOrder("desc")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    sortOrder === "desc"
+                      ? "bg-white text-emerald-950 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Terbaru di Atas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSortOrder("asc")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    sortOrder === "asc"
+                      ? "bg-white text-emerald-950 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Terlama di Atas (Kronologis)
+                </button>
+              </div>
             </div>
 
-            {state.data.data.entries.length === 0 ? (
+            {displayEntries.length === 0 ? (
               <div className="p-10 text-center text-xs text-slate-500">
                 Belum ada transaksi pada periode yang dipilih.
               </div>
@@ -144,7 +175,7 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
                         Uraian Transaksi
                       </th>
                       <th scope="col" rowSpan={2} className="p-3 text-right">
-                        Qty
+                        Jumlah (Qty)
                       </th>
                       <th scope="col" rowSpan={2} className="p-3 text-right">
                         Harga Satuan
@@ -159,19 +190,20 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
                         Saldo (Rp)
                       </th>
                       <th scope="colgroup" colSpan={3} className="p-2 text-center border-l border-slate-200/80 bg-slate-100/80">
-                        Status Alokasi & Umur
+                        Keterangan (Status Alokasi & Umur)
                       </th>
                     </tr>
                     <tr className="border-b border-slate-200 bg-slate-50/60 text-slate-500 text-[10px]">
-                      <th scope="col" className="p-2 text-right border-l border-slate-200/80">Lunas</th>
-                      <th scope="col" className="p-2 text-right">Sisa</th>
-                      <th scope="col" className="p-2 pr-6 text-right">Umur</th>
+                      <th scope="col" className="p-2 text-center border-l border-slate-200/80 min-w-[5rem]">Lunas</th>
+                      <th scope="col" className="p-2 text-right min-w-[6.5rem]">Sisa</th>
+                      <th scope="col" className="p-2 pr-6 text-right min-w-[6.5rem]">Umur Piutang</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {state.data.data.entries.map((entry) => {
+                    {displayEntries.map((entry) => {
                       const isDebit = entry.debit_idr !== "0";
                       const isCredit = entry.credit_idr !== "0";
+                      const isFullySettled = BigInt(entry.remaining_idr) === 0n;
 
                       return (
                         <tr key={entry.id} className="hover:bg-slate-50/80 transition-colors">
@@ -183,7 +215,7 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
 
                           <td className="p-3">
                             <div className="flex flex-col">
-                              {entry.entry_type === "credit_sale" && entry.description ? (
+                              {entry.entry_type === "credit_sale" && entry.description && openSale ? (
                                 <button
                                   type="button"
                                   onClick={() => openSale(entry.source_id)}
@@ -205,8 +237,8 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
                             </div>
                           </td>
 
-                          <td className="p-3 text-right font-mono text-slate-600">
-                            {entry.quantity ?? "—"}
+                          <td className="p-3 text-right font-mono text-slate-700">
+                            {formatQuantity(entry.quantity)}
                           </td>
 
                           <td className="p-3 text-right font-mono text-slate-600">
@@ -225,28 +257,45 @@ export function Ledger({ id, openSale }: { id: string; openSale: (id: string) =>
                             {formatRupiah(entry.running_balance_idr)}
                           </td>
 
-                          <td className="p-3 text-right font-mono tabular-nums text-emerald-700 border-l border-slate-100">
-                            {BigInt(entry.debit_idr) === 0n ? "—" : formatRupiah(entry.allocated_idr)}
+                          {/* Kolom Lunas (Status) - Persis seperti Excel Gambar 1 */}
+                          <td className="p-3 text-center border-l border-slate-100">
+                            {!isDebit ? (
+                              <span className="text-slate-400">—</span>
+                            ) : isFullySettled ? (
+                              <span className="inline-flex items-center text-cyan-800 font-semibold text-[10px] bg-cyan-50 px-2.5 py-0.5 rounded-md border border-cyan-200 shadow-2xs">
+                                Lunas
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center text-rose-700 font-semibold text-[10px] bg-rose-50 px-2.5 py-0.5 rounded-md border border-rose-200 shadow-2xs">
+                                Belum
+                              </span>
+                            )}
                           </td>
 
-                          <td className="p-3 text-right font-mono tabular-nums text-slate-700">
-                            {BigInt(entry.debit_idr) === 0n ? "—" : formatRupiah(entry.remaining_idr)}
+                          {/* Kolom Sisa - Persis seperti Excel Gambar 1 */}
+                          <td className="p-3 text-right font-mono tabular-nums">
+                            {!isDebit || isFullySettled ? (
+                              <span className="text-slate-400">—</span>
+                            ) : (
+                              <span className="font-bold text-rose-700">{formatRupiah(entry.remaining_idr)}</span>
+                            )}
                           </td>
 
+                          {/* Kolom Umur Piutang - Persis seperti Excel Gambar 1 */}
                           <td className="p-3 pr-6 text-right font-mono text-[11px] whitespace-nowrap">
-                            {BigInt(entry.debit_idr) === 0n
-                              ? "—"
-                              : BigInt(entry.remaining_idr) === 0n
-                              ? <span className="inline-flex items-center text-emerald-700 font-semibold text-[10px] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Lunas</span>
-                              : entry.age_days == null
-                              ? <span className="text-purple-700">Tgl tidak diketahui</span>
-                              : entry.age_days < 0
-                              ? <span className="text-purple-700">Masa depan</span>
-                              : entry.age_days > 60
-                              ? <span className="font-bold text-rose-700">{entry.age_days} hari</span>
-                              : entry.age_days > 30
-                              ? <span className="font-medium text-amber-800">{entry.age_days} hari</span>
-                              : <span className="text-slate-600">{entry.age_days} hari</span>}
+                            {!isDebit || isFullySettled ? (
+                              <span className="text-slate-400">—</span>
+                            ) : entry.age_days == null ? (
+                              <span className="text-purple-700">Tgl tidak diketahui</span>
+                            ) : entry.age_days < 0 ? (
+                              <span className="text-purple-700">Masa depan</span>
+                            ) : entry.age_days > 60 ? (
+                              <span className="font-bold text-rose-700">60 &gt; Hari</span>
+                            ) : entry.age_days > 30 ? (
+                              <span className="font-semibold text-amber-800">{entry.age_days} hari</span>
+                            ) : (
+                              <span className="text-slate-700 font-medium">{entry.age_days} hari</span>
+                            )}
                           </td>
                         </tr>
                       );
