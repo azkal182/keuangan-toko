@@ -70,6 +70,7 @@ struct StagedInsert {
     source_order: i64,
 }
 
+#[derive(Debug, Clone)]
 struct PreparedImportEntry {
     row_id: Uuid,
     customer_id: Uuid,
@@ -83,6 +84,7 @@ struct PreparedImportEntry {
     unit_price_idr: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PreparedLegacyAllocation {
     payment_entry_id: Uuid,
     debit_entry_id: Uuid,
@@ -1342,6 +1344,7 @@ pub async fn commit_batch(
                 .and_then(|value| parse_signed_money_value(value).ok()),
         });
     }
+    committed.sort_by_key(|e| (e.customer_id, e.effective_date, e.source_order));
     for chunk in committed.chunks(250) {
         let mut query = QueryBuilder::<Postgres>::new(
             "INSERT INTO receivable_entries(id,customer_id,entry_type,source_id,effective_date,debit_idr,credit_idr,source_order,created_by,description,quantity,unit_price_idr) ",
@@ -1401,62 +1404,7 @@ pub async fn commit_batch(
             .await
             .map_err(|error| commit_db_failure(request, "update_import_rows", error))?;
     }
-    let mut open_debits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
-    let mut open_credits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
-    let mut legacy_allocations = Vec::<PreparedLegacyAllocation>::new();
-    for entry in &committed {
-        if entry.debit > 0 {
-            let mut remaining_debit = entry.debit;
-            if let Some(credits) = open_credits.get_mut(&entry.customer_id) {
-                while remaining_debit > 0 {
-                    let Some((payment_id, open_credit)) = credits.pop_front() else {
-                        break;
-                    };
-                    let allocation = remaining_debit.min(open_credit);
-                    legacy_allocations.push(PreparedLegacyAllocation {
-                        payment_entry_id: payment_id,
-                        debit_entry_id: entry.ledger_id,
-                        amount: allocation,
-                    });
-                    remaining_debit -= allocation;
-                    if open_credit > allocation {
-                        credits.push_front((payment_id, open_credit - allocation));
-                    }
-                }
-            }
-            if remaining_debit > 0 {
-                open_debits
-                    .entry(entry.customer_id)
-                    .or_default()
-                    .push_back((entry.ledger_id, remaining_debit));
-            }
-        } else {
-            let mut remaining_credit = entry.credit;
-            if let Some(debits) = open_debits.get_mut(&entry.customer_id) {
-                while remaining_credit > 0 {
-                    let Some((debit_id, open_debit)) = debits.pop_front() else {
-                        break;
-                    };
-                    let allocation = remaining_credit.min(open_debit);
-                    legacy_allocations.push(PreparedLegacyAllocation {
-                        payment_entry_id: entry.ledger_id,
-                        debit_entry_id: debit_id,
-                        amount: allocation,
-                    });
-                    remaining_credit -= allocation;
-                    if open_debit > allocation {
-                        debits.push_front((debit_id, open_debit - allocation));
-                    }
-                }
-            }
-            if remaining_credit > 0 {
-                open_credits
-                    .entry(entry.customer_id)
-                    .or_default()
-                    .push_back((entry.ledger_id, remaining_credit));
-            }
-        }
-    }
+    let legacy_allocations = prepare_legacy_allocations(&committed);
     for chunk in legacy_allocations.chunks(250) {
         let mut query = QueryBuilder::<Postgres>::new(
             "INSERT INTO legacy_credit_allocations(id,payment_entry_id,debit_entry_id,amount_idr,status,created_by) ",
@@ -2166,5 +2114,152 @@ impl RetryKey {
         sqlx::query("INSERT INTO idempotency_records(id,actor_id,route_key,idempotency_key,request_hash,response_status,response_body) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(Uuid::new_v4()).bind(actor).bind(self.route).bind(self.key).bind(self.hash).bind(i32::from(status.as_u16())).bind(&body).execute(&mut *tx).await.map_err(|_|request.internal())?;
         tx.commit().await.map_err(|_| request.internal())?;
         Ok((status, Json(body)))
+    }
+}
+
+fn prepare_legacy_allocations(
+    committed: &[PreparedImportEntry],
+) -> Vec<PreparedLegacyAllocation> {
+    let mut open_debits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
+    let mut open_credits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
+    let mut legacy_allocations = Vec::<PreparedLegacyAllocation>::new();
+    for entry in committed {
+        if entry.debit > 0 {
+            let mut remaining_debit = entry.debit;
+            if let Some(credits) = open_credits.get_mut(&entry.customer_id) {
+                while remaining_debit > 0 {
+                    let Some((payment_id, open_credit)) = credits.pop_front() else {
+                        break;
+                    };
+                    let allocation = remaining_debit.min(open_credit);
+                    legacy_allocations.push(PreparedLegacyAllocation {
+                        payment_entry_id: payment_id,
+                        debit_entry_id: entry.ledger_id,
+                        amount: allocation,
+                    });
+                    remaining_debit -= allocation;
+                    if open_credit > allocation {
+                        credits.push_front((payment_id, open_credit - allocation));
+                    }
+                }
+            }
+            if remaining_debit > 0 {
+                open_debits
+                    .entry(entry.customer_id)
+                    .or_default()
+                    .push_back((entry.ledger_id, remaining_debit));
+            }
+        } else {
+            let mut remaining_credit = entry.credit;
+            if let Some(debits) = open_debits.get_mut(&entry.customer_id) {
+                while remaining_credit > 0 {
+                    let Some((debit_id, open_debit)) = debits.pop_front() else {
+                        break;
+                    };
+                    let allocation = remaining_credit.min(open_debit);
+                    legacy_allocations.push(PreparedLegacyAllocation {
+                        payment_entry_id: entry.ledger_id,
+                        debit_entry_id: debit_id,
+                        amount: allocation,
+                    });
+                    remaining_credit -= allocation;
+                    if open_debit > allocation {
+                        debits.push_front((debit_id, open_debit - allocation));
+                    }
+                }
+            }
+            if remaining_credit > 0 {
+                open_credits
+                    .entry(entry.customer_id)
+                    .or_default()
+                    .push_back((entry.ledger_id, remaining_credit));
+            }
+        }
+    }
+    legacy_allocations
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn sorts_and_allocates_legacy_fifo_chronologically_regardless_of_sheet_order() {
+        let customer_id = Uuid::new_v4();
+        // December transaction placed at row 1 in Excel sheet (source_order: 1)
+        let debit_dec = PreparedImportEntry {
+            row_id: Uuid::new_v4(),
+            customer_id,
+            ledger_id: Uuid::new_v4(),
+            effective_date: NaiveDate::from_ymd_opt(2025, 12, 8).unwrap(),
+            debit: 18_900,
+            credit: 0,
+            source_order: 1,
+            description: Some("BATU".into()),
+            quantity: None,
+            unit_price_idr: None,
+        };
+        // Older September transaction placed further down in Excel (source_order: 10)
+        let debit_sep_old = PreparedImportEntry {
+            row_id: Uuid::new_v4(),
+            customer_id,
+            ledger_id: Uuid::new_v4(),
+            effective_date: NaiveDate::from_ymd_opt(2025, 9, 23).unwrap(),
+            debit: 10_000,
+            credit: 0,
+            source_order: 10,
+            description: Some("KATER".into()),
+            quantity: None,
+            unit_price_idr: None,
+        };
+        // September payment (source_order: 11)
+        let payment_sep = PreparedImportEntry {
+            row_id: Uuid::new_v4(),
+            customer_id,
+            ledger_id: Uuid::new_v4(),
+            effective_date: NaiveDate::from_ymd_opt(2025, 9, 23).unwrap(),
+            debit: 0,
+            credit: 28_900,
+            source_order: 11,
+            description: Some("PEMBAYARAN LUNAS".into()),
+            quantity: None,
+            unit_price_idr: None,
+        };
+        // September transaction immediately following payment (source_order: 12)
+        let debit_sep_after = PreparedImportEntry {
+            row_id: Uuid::new_v4(),
+            customer_id,
+            ledger_id: Uuid::new_v4(),
+            effective_date: NaiveDate::from_ymd_opt(2025, 9, 23).unwrap(),
+            debit: 18_900,
+            credit: 0,
+            source_order: 12,
+            description: Some("FC".into()),
+            quantity: None,
+            unit_price_idr: None,
+        };
+
+        let mut committed = vec![
+            debit_dec.clone(),
+            debit_sep_old.clone(),
+            payment_sep.clone(),
+            debit_sep_after.clone(),
+        ];
+
+        // Apply chronological sort key by (customer_id, effective_date, source_order)
+        committed.sort_by_key(|e| (e.customer_id, e.effective_date, e.source_order));
+
+        let allocations = prepare_legacy_allocations(&committed);
+
+        // Allocations must pay debit_sep_old (10_000) and debit_sep_after (18_900), NOT debit_dec!
+        assert_eq!(allocations.len(), 2);
+        assert_eq!(allocations[0].payment_entry_id, payment_sep.ledger_id);
+        assert_eq!(allocations[0].debit_entry_id, debit_sep_old.ledger_id);
+        assert_eq!(allocations[0].amount, 10_000);
+
+        assert_eq!(allocations[1].payment_entry_id, payment_sep.ledger_id);
+        assert_eq!(allocations[1].debit_entry_id, debit_sep_after.ledger_id);
+        assert_eq!(allocations[1].amount, 18_900);
     }
 }
