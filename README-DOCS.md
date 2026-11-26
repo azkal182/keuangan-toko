@@ -22,6 +22,8 @@
 | 13 | [IMPLEMENTATION_PLAN](docs/IMPLEMENTATION_PLAN.md) | urutan fase web-first, acceptance gate, dan acuan workbook |
 | 14 | [PROJECT_STATUS](docs/PROJECT_STATUS.md) | status aktual, fase berjalan, blocker, dan langkah berikut |
 | 15 | [UI_UX_PERFORMANCE_AUDIT](docs/UI_UX_PERFORMANCE_AUDIT.md) | temuan review frontend, route, pemisahan bundle, dan tindak lanjut pengukuran |
+| 16 | [DESKTOP_IMPLEMENTATION_PLAN](docs/DESKTOP_IMPLEMENTATION_PLAN.md) | rencana PH-09 dengan prototipe data sintetis sebelum integrasi API |
+| 17 | [DESKTOP_WEB_FEATURE_MAP](docs/DESKTOP_WEB_FEATURE_MAP.md) | matriks pemetaan fitur web terhadap kesiapan prototipe mock desktop |
 
 ## Skill khusus repo
 
