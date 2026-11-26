@@ -1,8 +1,8 @@
-//! Native 3-Panel Status Bar Component
-//! Memberikan informasi status sistem, tanggal usaha, dan pengguna aktif dengan estetika desktop klasik.
+//! Modern Enterprise Status Bar Component
+//! Memberikan informasi status sistem, mode data, dan waktu usaha dengan visual minimalis dan profesional.
 
 use crate::ui::theme::Theme;
-use gpui::{Div, div, prelude::*, px, rgb};
+use gpui::{Div, FontWeight, div, prelude::*, px, rgb};
 
 pub struct StatusBar {
     pub message: String,
@@ -25,55 +25,64 @@ impl StatusBar {
 
     pub fn render(self) -> Div {
         div()
-            .h(px(24.0))
+            .h(px(26.0))
             .bg(rgb(Theme::BG_STATUS_BAR))
             .border_t_1()
-            .border_color(rgb(Theme::GRID_LINE))
+            .border_color(rgb(Theme::BORDER_DEFAULT))
             .flex()
             .items_center()
-            .px(px(6.0))
-            .gap(px(4.0))
+            .justify_between()
+            .px(px(12.0))
             .text_size(px(11.0))
-            .text_color(rgb(Theme::TEXT_SECONDARY))
-            // Panel 1: Status pesan sistem (flex grow)
+            .text_color(rgb(Theme::TEXT_MUTED))
+            // Left: Glowing status indicator + Pesan sistem
             .child(
                 div()
-                    .flex_1()
-                    .h(px(18.0))
-                    .bg(rgb(Theme::BG_SURFACE))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_LIGHT))
-                    .px(px(6.0))
                     .flex()
                     .items_center()
-                    .overflow_hidden()
-                    .child(self.message),
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(8.0))
+                            .text_color(rgb(0x16A34A))
+                            .child("●"),
+                    )
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(Theme::TEXT_SECONDARY))
+                            .child(self.message),
+                    ),
             )
-            // Panel 2: Tanggal Usaha WIB
+            // Center: Badge mode data enterprise
             .child(
-                div()
-                    .w(px(190.0))
-                    .h(px(18.0))
-                    .bg(rgb(Theme::BG_SURFACE))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_LIGHT))
-                    .px(px(6.0))
-                    .flex()
-                    .items_center()
-                    .child(self.business_date),
+                div().flex().items_center().gap(px(6.0)).child(
+                    div()
+                        .px(px(6.0))
+                        .py(px(1.0))
+                        .rounded(px(3.0))
+                        .bg(rgb(Theme::PRIMARY_LIGHT))
+                        .border_1()
+                        .border_color(rgb(Theme::PRIMARY_BORDER))
+                        .text_size(px(10.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(Theme::PRIMARY))
+                        .child("TokoStoreAdapter: Mock Data Engine"),
+                ),
             )
-            // Panel 3: Pengguna Aktif & Role
+            // Right: Tanggal & User
             .child(
                 div()
-                    .w(px(220.0))
-                    .h(px(18.0))
-                    .bg(rgb(Theme::BG_SURFACE))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_LIGHT))
-                    .px(px(6.0))
                     .flex()
                     .items_center()
-                    .child(self.user_label),
+                    .gap(px(12.0))
+                    .child(div().child(self.business_date))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(Theme::TEXT_PRIMARY))
+                            .child(self.user_label),
+                    ),
             )
     }
 }

@@ -1,10 +1,10 @@
-//! Native DBGrid Component
-//! Menghadirkan tabel data grid bergaya desktop sejati:
-//! - Grid lines horizontal & vertikal tajam (classic 1px border)
-//! - Header kolom bergaya 3D/inset dengan pemisah kolom
-//! - Baris kompak (26px), perataan kanan untuk angka & rupiah
-//! - Highlight baris terpilih bergaya Windows Blue dengan teks putih
-//! - Zebra row striping halus untuk kenyamanan mata
+//! Modern Enterprise DBGrid Component
+//! Menghadirkan tabel data grid kelas enterprise:
+//! - Header halus dengan border bawah bersih dan pemisah kolom lembut
+//! - Tinggi baris yang nyaman (32px), tipografi kontras dan mudah dibaca
+//! - Seleksi baris modern: soft blue highlight dengan teks tetap tajam
+//! - Badge status berbentuk pill modern dengan bingkai halus
+//! - Angka nominal rupiah rata kanan dengan format tabular rapi
 
 use crate::ui::theme::Theme;
 use gpui::{Div, FontWeight, SharedString, div, prelude::*, px, rgb};
@@ -25,10 +25,10 @@ pub struct GridColumn {
 
 pub fn render_grid_header(columns: &[GridColumn]) -> Div {
     let mut header_row = div()
-        .h(px(28.0))
+        .h(px(32.0))
         .bg(rgb(Theme::BG_HEADER))
         .border_b_1()
-        .border_color(rgb(Theme::GRID_LINE))
+        .border_color(rgb(Theme::BORDER_DEFAULT))
         .flex()
         .items_center();
 
@@ -38,13 +38,13 @@ pub fn render_grid_header(columns: &[GridColumn]) -> Div {
             .w(px(col.width_px))
             .flex_shrink_0()
             .border_r_1()
-            .border_color(rgb(Theme::GRID_LINE))
-            .px(px(6.0))
+            .border_color(rgb(Theme::BORDER_LIGHT))
+            .px(px(8.0))
             .flex()
             .items_center()
             .text_size(px(11.5))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(Theme::TEXT_PRIMARY));
+            .font_weight(FontWeight::BOLD)
+            .text_color(rgb(Theme::TEXT_MUTED));
 
         match col.align {
             ColumnAlign::Left => col_div = col_div.justify_start(),
@@ -65,7 +65,7 @@ pub fn grid_cell(
     is_selected: bool,
 ) -> Div {
     let text_color = if is_selected {
-        Theme::TEXT_SELECTED
+        Theme::PRIMARY_HOVER
     } else {
         Theme::TEXT_PRIMARY
     };
@@ -75,13 +75,13 @@ pub fn grid_cell(
         .w(px(width_px))
         .flex_shrink_0()
         .border_r_1()
-        .border_color(rgb(Theme::GRID_LINE))
-        .px(px(6.0))
+        .border_color(rgb(Theme::BORDER_LIGHT))
+        .px(px(8.0))
         .flex()
         .items_center()
         .overflow_hidden()
         .whitespace_nowrap()
-        .text_size(px(11.5))
+        .text_size(px(12.0))
         .text_color(rgb(text_color));
 
     match align {
@@ -97,48 +97,55 @@ pub fn grid_badge(
     text: &'static str,
     color_hex: u32,
     bg_hex: u32,
+    border_hex: u32,
     width_px: f32,
-    is_selected: bool,
 ) -> Div {
-    let (text_c, bg_c) = if is_selected {
-        (Theme::TEXT_SELECTED, Theme::BG_ROW_SELECTED)
-    } else {
-        (color_hex, bg_hex)
-    };
-
     div()
         .h_full()
         .w(px(width_px))
         .flex_shrink_0()
         .border_r_1()
-        .border_color(rgb(Theme::GRID_LINE))
+        .border_color(rgb(Theme::BORDER_LIGHT))
         .px(px(6.0))
         .flex()
         .items_center()
         .justify_center()
         .child(
             div()
-                .px(px(6.0))
-                .py(px(1.0))
-                .rounded(px(3.0))
-                .bg(rgb(bg_c))
+                .px(px(8.0))
+                .py(px(2.0))
+                .rounded(px(4.0))
+                .bg(rgb(bg_hex))
+                .border_1()
+                .border_color(rgb(border_hex))
                 .text_size(px(10.5))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(text_c))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(color_hex))
                 .child(text),
         )
 }
 
 pub fn render_empty_state(message: &'static str) -> Div {
     div()
-        .h(px(120.0))
+        .h(px(140.0))
         .w_full()
-        .bg(rgb(Theme::BG_SURFACE))
+        .bg(rgb(Theme::BG_CARD))
         .flex()
         .flex_col()
         .items_center()
         .justify_center()
-        .text_size(px(12.0))
-        .text_color(rgb(Theme::TEXT_MUTED))
-        .child(message)
+        .gap(px(6.0))
+        .child(
+            div()
+                .text_size(px(20.0))
+                .text_color(rgb(Theme::TEXT_LIGHT))
+                .child("📋"),
+        )
+        .child(
+            div()
+                .text_size(px(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(rgb(Theme::TEXT_MUTED))
+                .child(message),
+        )
 }

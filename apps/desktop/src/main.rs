@@ -1,12 +1,12 @@
-//! Keuangan Toko - Native Desktop Application (GPUI)
-#![allow(clippy::get_first, clippy::too_many_arguments)]
-//! Implementasi aplikasi pencatatan keuangan/piutang toko dengan antarmuka native desktop sejati:
-//! - Menu Bar, Quick Action Toolbar, 3-panel Status Bar
-//! - Native DBGrid dengan grid lines tajam, pemilihan baris Windows Blue, format angka tabular rata kanan
-//! - Navigasi keyboard responsif (F2-F8, Ctrl+N/P/L, Esc, Enter, Tab)
+//! Keuangan Toko - Enterprise Desktop Application (GPUI)
+//! Antarmuka desktop kelas enterprise yang modern, profesional, dan responsif:
+//! - Top App Bar modern dengan branding, tab navigasi aktif, dan profil operator
+//! - Action Toolbar kontekstual dengan tombol aksi cepat dan kotak pencarian terintegrasi
+//! - Enterprise DBGrid: baris nyaman (32px), seleksi soft blue dengan left indicator bar,
+//!   badge status berbentuk pill modern dengan border halus, angka tabular rata kanan
+//! - Status bar 3-panel minimalis dengan indikator status sistem aktif
+//! - Windowed modal dialogs modern (Penjualan Multi-Item, Pembayaran FIFO, Deposit, Aging, User)
 //! - Beroperasi melalui TokoStoreAdapter dengan in-memory MockDataAdapter
-//! - Fitur lengkap: Direktori Pelanggan, Buku Piutang & Riwayat Pembayaran, Penjualan Kredit Instan Multi-Item,
-//!   Pembayaran FIFO, Penerapan Saldo Kredit (Deposit), Laporan Aging & Drill-down, Manajemen Pengguna
 
 mod mock;
 pub mod store;
@@ -22,11 +22,13 @@ use store::*;
 use ui::db_grid::{
     ColumnAlign, GridColumn, grid_badge, grid_cell, render_empty_state, render_grid_header,
 };
-use ui::menu_bar::render_menu_bar_container;
+use ui::menu_bar::{brand_logo_pill, nav_tab_button, render_top_app_bar_container};
 use ui::modal::ModalDialog;
 use ui::status_bar::StatusBar;
 use ui::theme::{Theme, format_idr};
-use ui::tool_bar::{render_toolbar_container, tool_button, tool_separator};
+use ui::tool_bar::{
+    primary_action_button, render_toolbar_container, secondary_action_button, tool_separator,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurrentView {
@@ -95,7 +97,8 @@ impl Desktop {
             selected_customer_id: None,
             customer_tab: CustomerTab::Ledger,
             query: String::new(),
-            status_msg: "Sistem siap. Gunakan mouse atau tombol pintas keyboard (F2-F8).".into(),
+            status_msg: "Sistem operasional siap. Gunakan mouse atau pintasan keyboard (F2 - F8)."
+                .into(),
             active_modal: None,
             form_fields: Vec::new(),
             form_active: 0,
@@ -240,7 +243,7 @@ impl Desktop {
 
         if unallocated_payments.is_empty() {
             self.active_modal = Some(ActiveModal::Notice {
-                title: "Saldo Kredit Kosong",
+                title: "Saldo Deposit Kosong",
                 message: "Pelanggan ini tidak memiliki saldo pembayaran lebih (deposit) yang dapat diterapkan.".into(),
             });
             return;
@@ -249,7 +252,7 @@ impl Desktop {
         if open_debits.is_empty() {
             self.active_modal = Some(ActiveModal::Notice {
                 title: "Tidak Ada Nota Terbuka",
-                message: "Semua nota debet pelanggan sudah lunas. Saldo kredit tetap tersimpan sebagai deposit.".into(),
+                message: "Semua tagihan debet pelanggan sudah lunas. Saldo kredit tetap tersimpan sebagai deposit aman.".into(),
             });
             return;
         }
@@ -285,7 +288,7 @@ impl Desktop {
         };
         self.form_fields = vec![(
             "Alasan Koreksi / Pembatalan (Wajib)",
-            "Salah input transaksi".into(),
+            "Salah input transaksi barang".into(),
         )];
         self.form_active = 0;
         self.form_error.clear();
@@ -359,7 +362,7 @@ impl Desktop {
                 self.active_modal = None;
             }
             ActiveModal::Login => {
-                let username = fields.get(0).cloned().unwrap_or_default();
+                let username = fields.first().cloned().unwrap_or_default();
                 let password = fields.get(1).cloned().unwrap_or_default();
                 match self.store.login(&username, &password) {
                     Ok(user) => {
@@ -377,7 +380,7 @@ impl Desktop {
                 }
             }
             ActiveModal::ChangePassword => {
-                let current = fields.get(0).cloned().unwrap_or_default();
+                let current = fields.first().cloned().unwrap_or_default();
                 let new_pw = fields.get(1).cloned().unwrap_or_default();
                 let conf_pw = fields.get(2).cloned().unwrap_or_default();
 
@@ -406,7 +409,7 @@ impl Desktop {
                 }
             }
             ActiveModal::NewCustomer => {
-                let name = fields.get(0).cloned().unwrap_or_default();
+                let name = fields.first().cloned().unwrap_or_default();
                 let code = fields.get(1).filter(|s| !s.is_empty()).cloned();
                 let address = fields.get(2).filter(|s| !s.is_empty()).cloned();
                 let phone = fields.get(3).filter(|s| !s.is_empty()).cloned();
@@ -423,7 +426,7 @@ impl Desktop {
                         self.current_view = CurrentView::CustomerDetail;
                         self.active_modal = None;
                         self.status_msg =
-                            format!("Pelanggan {} berhasil ditambahkan.", detail.name);
+                            format!("Pelanggan {} berhasil didaftarkan.", detail.name);
                     }
                     Err(e) => {
                         self.form_error = e.0;
@@ -431,7 +434,7 @@ impl Desktop {
                 }
             }
             ActiveModal::EditCustomer(id) => {
-                let name = fields.get(0).cloned().unwrap_or_default();
+                let name = fields.first().cloned().unwrap_or_default();
                 let code = fields.get(1).filter(|s| !s.is_empty()).cloned();
                 let address = fields.get(2).filter(|s| !s.is_empty()).cloned();
                 let phone = fields.get(3).filter(|s| !s.is_empty()).cloned();
@@ -454,7 +457,7 @@ impl Desktop {
                 }
             }
             ActiveModal::RecordSale => {
-                let date_str = fields.get(0).cloned().unwrap_or_default();
+                let date_str = fields.first().cloned().unwrap_or_default();
                 let reason_str = fields.get(1).cloned().unwrap_or_default();
 
                 let effective_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
@@ -514,7 +517,7 @@ impl Desktop {
                     Ok(total) => {
                         self.active_modal = None;
                         self.status_msg = format!(
-                            "Penjualan kredit Rp {} berhasil dicatat.",
+                            "Penjualan kredit Rp {} berhasil dicatat ke buku piutang.",
                             format_idr(total)
                         );
                     }
@@ -524,7 +527,7 @@ impl Desktop {
                 }
             }
             ActiveModal::RecordPayment => {
-                let date_str = fields.get(0).cloned().unwrap_or_default();
+                let date_str = fields.first().cloned().unwrap_or_default();
                 let amount_str = fields.get(1).cloned().unwrap_or_default();
                 let method = fields.get(2).cloned().unwrap_or_default();
                 let reference = fields.get(3).filter(|s| !s.is_empty()).cloned();
@@ -582,7 +585,7 @@ impl Desktop {
                 }
             }
             ActiveModal::ApplyDeposit => {
-                let payment_id = fields.get(0).cloned().unwrap_or_default();
+                let payment_id = fields.first().cloned().unwrap_or_default();
                 let debit_entry_id = fields.get(1).cloned().unwrap_or_default();
                 let amount_str = fields.get(2).cloned().unwrap_or_default();
                 let reason = fields.get(3).cloned().unwrap_or_default();
@@ -620,7 +623,7 @@ impl Desktop {
                 customer_id,
                 entry_id,
             } => {
-                let reason = fields.get(0).cloned().unwrap_or_default();
+                let reason = fields.first().cloned().unwrap_or_default();
                 match self
                     .store
                     .reverse_transaction(&customer_id, &entry_id, &reason)
@@ -635,7 +638,7 @@ impl Desktop {
                 }
             }
             ActiveModal::NewUser => {
-                let username = fields.get(0).cloned().unwrap_or_default();
+                let username = fields.first().cloned().unwrap_or_default();
                 let full_name = fields.get(1).cloned().unwrap_or_default();
                 let role_str = fields.get(2).cloned().unwrap_or_default();
                 let temp_pw = fields.get(3).cloned().unwrap_or_default();
@@ -667,7 +670,7 @@ impl Desktop {
                 }
             }
             ActiveModal::ChangeAsOfDate => {
-                let date_str = fields.get(0).cloned().unwrap_or_default();
+                let date_str = fields.first().cloned().unwrap_or_default();
                 match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
                     Ok(d) => {
                         self.aging_as_of = d;
@@ -830,162 +833,207 @@ impl Render for Desktop {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_owner = self.is_owner();
 
-        let user_label = match &self.session {
-            Some(u) => format!("Operator: {} ({:?})", u.username, u.role),
-            None => "Belum Masuk (Anonim)".into(),
+        let user_display = match &self.session {
+            Some(u) => format!("{} ({:?})", u.username, u.role),
+            None => "Tamu (Belum Masuk)".into(),
         };
 
-        let date_label = format!("Tanggal: {} | WIB", self.today_jakarta().format("%d %b %Y"));
+        let date_label = format!("WIB · {}", self.today_jakarta().format("%d %b %Y"));
 
-        // Layout aplikasi desktop klasik
+        // Frame Aplikasi Enterprise
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
             .size_full()
-            .bg(rgb(Theme::BG_WINDOW))
+            .bg(rgb(Theme::BG_APP))
             .flex()
             .flex_col()
             .overflow_hidden()
-            // 1. Native Menu Bar Klasik
+            // 1. Top Navigation Bar Enterprise (Deep Slate Header)
             .child(
-                render_menu_bar_container()
+                render_top_app_bar_container()
+                    // Logo & Brand
+                    .child(brand_logo_pill())
+                    // Center Navigation Tabs
                     .child(
                         div()
-                            .id("menu-berkas")
-                            .px(px(8.0))
-                            .py(px(2.0))
-                            .rounded(px(2.0))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_login_modal();
-                                cx.notify();
-                            }))
-                            .child("Berkas (Ctrl+L)"),
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(
+                                nav_tab_button(
+                                    "Direktori Pelanggan",
+                                    "F2",
+                                    self.current_view == CurrentView::CustomerList,
+                                )
+                                .id("nav-tab-cust")
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.current_view = CurrentView::CustomerList;
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                            .child(
+                                nav_tab_button(
+                                    "Laporan Aging",
+                                    "F6",
+                                    self.current_view == CurrentView::AgingReport,
+                                )
+                                .id("nav-tab-aging")
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.current_view = CurrentView::AgingReport;
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                            .when(is_owner, |d| {
+                                d.child(
+                                    nav_tab_button(
+                                        "Manajemen Pengguna",
+                                        "F8",
+                                        self.current_view == CurrentView::UserManagement,
+                                    )
+                                    .id("nav-tab-users")
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
+                                            this.current_view = CurrentView::UserManagement;
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                            }),
                     )
+                    // Right: User Profile & Quick Switch
                     .child(
-                        div()
-                            .id("menu-pelanggan")
-                            .px(px(8.0))
-                            .py(px(2.0))
-                            .rounded(px(2.0))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.current_view = CurrentView::CustomerList;
-                                cx.notify();
-                            }))
-                            .child("Pelanggan (F2)"),
-                    )
-                    .child(
-                        div()
-                            .id("menu-transaksi")
-                            .px(px(8.0))
-                            .py(px(2.0))
-                            .rounded(px(2.0))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_record_sale_modal();
-                                cx.notify();
-                            }))
-                            .child("Transaksi (F3)"),
-                    )
-                    .child(
-                        div()
-                            .id("menu-laporan")
-                            .px(px(8.0))
-                            .py(px(2.0))
-                            .rounded(px(2.0))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.current_view = CurrentView::AgingReport;
-                                cx.notify();
-                            }))
-                            .child("Laporan (F6)"),
-                    )
-                    .when(is_owner, |d| {
-                        d.child(
+                        div().flex().items_center().gap(px(10.0)).child(
                             div()
-                                .id("menu-pengaturan")
+                                .id("btn-user-profile")
+                                .h(px(30.0))
                                 .px(px(8.0))
-                                .py(px(2.0))
-                                .rounded(px(2.0))
+                                .rounded(px(4.0))
+                                .bg(rgb(0x1E293B))
+                                .border_1()
+                                .border_color(rgb(0x334155))
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
                                 .cursor_pointer()
-                                .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+                                .hover(|d| d.bg(rgb(0x334155)))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.current_view = CurrentView::UserManagement;
+                                    this.open_login_modal();
                                     cx.notify();
                                 }))
-                                .child("Pengaturan (F8)"),
-                        )
-                    }),
+                                .child(
+                                    div()
+                                        .w(px(18.0))
+                                        .h(px(18.0))
+                                        .rounded_full()
+                                        .bg(rgb(Theme::PRIMARY))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_size(px(10.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(rgb(0xFFFFFF))
+                                        .child("👤"),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(11.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(rgb(Theme::TEXT_ON_DARK))
+                                        .child(user_display.clone()),
+                                ),
+                        ),
+                    ),
             )
-            // 2. Action Toolbar Cepat Klasik
+            // 2. Action Toolbar Kontekstual (Putih Bersih)
             .child(
                 render_toolbar_container()
+                    // Left: Quick Action Buttons
                     .child(
-                        tool_button("+ Pelanggan", "Ctrl+N")
-                            .id("tool-add-cust")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_new_customer_modal();
-                                cx.notify();
-                            })),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                primary_action_button("+ Belanja Kredit", "F3")
+                                    .id("tool-btn-sale")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_record_sale_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                secondary_action_button("+ Pembayaran", "F4")
+                                    .id("tool-btn-pay")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_record_payment_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                secondary_action_button("Terapkan Saldo", "F5")
+                                    .id("tool-btn-deposit")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_apply_deposit_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(tool_separator())
+                            .child(
+                                secondary_action_button("+ Pelanggan Baru", "Ctrl+N")
+                                    .id("tool-btn-add-cust")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_new_customer_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                secondary_action_button("Ganti Sandi", "Ctrl+P")
+                                    .id("tool-btn-change-pw")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_change_password_modal();
+                                        cx.notify();
+                                    })),
+                            ),
                     )
+                    // Right: Quick Search Box
                     .child(
-                        tool_button("+ Belanja Kredit", "F3")
-                            .id("tool-sale")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_record_sale_modal();
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        tool_button("+ Pembayaran", "F4")
-                            .id("tool-pay")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_record_payment_modal();
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        tool_button("Terapkan Saldo", "F5")
-                            .id("tool-deposit")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_apply_deposit_modal();
-                                cx.notify();
-                            })),
-                    )
-                    .child(tool_separator())
-                    .child(
-                        tool_button("Daftar Piutang", "F2")
-                            .id("tool-cust-list")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.current_view = CurrentView::CustomerList;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        tool_button("Laporan Aging", "F6")
-                            .id("tool-aging")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.current_view = CurrentView::AgingReport;
-                                cx.notify();
-                            })),
-                    )
-                    .when(is_owner, |d| {
-                        d.child(tool_separator()).child(
-                            tool_button("Manajemen Pengguna", "F8")
-                                .id("tool-users")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.current_view = CurrentView::UserManagement;
-                                    cx.notify();
-                                })),
-                        )
-                    }),
+                        div()
+                            .w(px(280.0))
+                            .h(px(28.0))
+                            .bg(rgb(Theme::BG_APP))
+                            .border_1()
+                            .border_color(rgb(Theme::BORDER_STRONG))
+                            .rounded(px(4.0))
+                            .px(px(8.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(Theme::TEXT_LIGHT))
+                                    .child("🔍"),
+                            )
+                            .child(if self.query.is_empty() {
+                                div()
+                                    .text_size(px(11.5))
+                                    .text_color(rgb(Theme::TEXT_MUTED))
+                                    .child("Cari pelanggan (Ketik langsung)...")
+                            } else {
+                                div()
+                                    .text_size(px(11.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                                    .child(self.query.clone())
+                            }),
+                    ),
             )
-            // 3. Area Konten Utama
+            // 3. Konten Utama
             .child(
                 div()
                     .flex_1()
@@ -997,14 +1045,14 @@ impl Render for Desktop {
                         CurrentView::UserManagement => self.render_user_management_view(cx),
                     }),
             )
-            // 4. 3-Panel Status Bar Klasik
-            .child(StatusBar::new(&self.status_msg, &date_label, &user_label).render())
-            // 5. Modal Dialog Overlay
+            // 4. Modern Enterprise Status Bar
+            .child(StatusBar::new(&self.status_msg, &date_label, &user_display).render())
+            // 5. Modal Dialogs Overlay
             .children(self.render_modal_overlay(cx))
     }
 }
 
-// Implementasi Render View Helpers
+// Implementasi View Enterprise
 impl Desktop {
     fn render_customer_list_view(&self, cx: &mut Context<Self>) -> Div {
         let q = CustomerQuery {
@@ -1022,33 +1070,33 @@ impl Desktop {
 
         let columns = vec![
             GridColumn {
-                title: "Kode",
+                title: "KODE",
                 width_px: 85.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "Nama Pelanggan",
+                title: "NAMA PELANGGAN",
                 width_px: 260.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Alamat / Wilayah",
+                title: "WILAYAH / ALAMAT",
                 width_px: 280.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Total Piutang (Rp)",
-                width_px: 155.0,
+                title: "TOTAL PIUTANG",
+                width_px: 160.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Saldo Kredit (Rp)",
-                width_px: 155.0,
+                title: "SALDO KREDIT (DEPOSIT)",
+                width_px: 175.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Status",
-                width_px: 95.0,
+                title: "STATUS AKUN",
+                width_px: 110.0,
                 align: ColumnAlign::Center,
             },
         ];
@@ -1058,210 +1106,109 @@ impl Desktop {
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_WINDOW))
-            .p(px(10.0))
-            .gap(px(8.0))
+            .bg(rgb(Theme::BG_APP))
+            .p(px(12.0))
+            .gap(px(10.0))
+            // KPI Cards Enterprise
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
-                    .child(self.kpi_card(
-                        "Total Pelanggan Terdaftar",
-                        format!("{} Pelanggan", total_customers),
+                    .gap(px(12.0))
+                    .child(self.enterprise_kpi_card(
+                        "TOTAL PELANGGAN",
+                        format!("{} Entitas", total_customers),
+                        "Terdaftar aktif di sistem toko",
                         Theme::TEXT_PRIMARY,
+                        0x64748B,
                     ))
-                    .child(self.kpi_card(
-                        "Total Piutang Berjalan",
+                    .child(self.enterprise_kpi_card(
+                        "TOTAL PIUTANG BERJALAN",
                         format!("Rp {}", format_idr(total_piutang)),
-                        Theme::COLOR_DEBIT,
+                        "Kewajiban pembayaran belum lunas",
+                        Theme::BADGE_DEBIT_TEXT,
+                        Theme::BADGE_DEBIT_BORDER,
                     ))
-                    .child(self.kpi_card(
-                        "Total Saldo Kredit (Deposit)",
+                    .child(self.enterprise_kpi_card(
+                        "TOTAL SALDO KREDIT (DEPOSIT)",
                         format!("Rp {}", format_idr(total_deposit)),
-                        Theme::COLOR_DEPOSIT,
+                        "Kelebihan pembayaran dapat dialokasikan",
+                        Theme::PRIMARY,
+                        Theme::PRIMARY_BORDER,
                     )),
             )
-            .child(
-                div()
-                    .h(px(34.0))
-                    .bg(rgb(Theme::BG_SURFACE))
-                    .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(Theme::TEXT_SECONDARY))
-                                    .child("Cari Pelanggan:"),
-                            )
-                            .child(
-                                div()
-                                    .w(px(300.0))
-                                    .h(px(24.0))
-                                    .bg(rgb(0xFFFFFF))
-                                    .border_1()
-                                    .border_color(rgb(Theme::BORDER_DARK))
-                                    .px(px(6.0))
-                                    .flex()
-                                    .items_center()
-                                    .text_size(px(12.0))
-                                    .child(if self.query.is_empty() {
-                                        div()
-                                            .text_color(rgb(Theme::TEXT_MUTED))
-                                            .child("Ketik kode / nama (Esc untuk bersihkan)...")
-                                    } else {
-                                        div()
-                                            .text_color(rgb(Theme::TEXT_PRIMARY))
-                                            .child(self.query.clone())
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("btn-add-cust-list")
-                            .h(px(24.0))
-                            .px(px(10.0))
-                            .bg(rgb(Theme::BTN_PRIMARY_BG))
-                            .rounded(px(2.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(0x106EBE)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_new_customer_modal();
-                                cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(0xFFFFFF))
-                                    .child("+ Tambah Pelanggan Baru (Ctrl+N)"),
-                            ),
-                    ),
-            )
+            // Container Tabel DBGrid
             .child(
                 div()
                     .flex_1()
-                    .bg(rgb(Theme::BG_SURFACE))
+                    .bg(rgb(Theme::BG_CARD))
                     .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .rounded(px(6.0))
+                    .shadow_sm()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
                     .child(render_grid_header(&columns))
-                    .child(div().id("cust-list-scroll").flex_1().children(
-                        if customers.is_empty() {
-                            vec![
-                                render_empty_state(
-                                    "Tidak ada data pelanggan yang sesuai kriteria pencarian.",
-                                )
-                                .into_any_element(),
-                            ]
-                        } else {
-                            customers
-                                .into_iter()
-                                .enumerate()
-                                .map(|(idx, cust)| {
-                                    let is_selected =
-                                        self.selected_customer_id.as_deref() == Some(&cust.id);
-                                    let bg_color = if is_selected {
-                                        Theme::BG_ROW_SELECTED
-                                    } else if idx % 2 == 1 {
-                                        Theme::BG_ROW_ALT
-                                    } else {
-                                        Theme::BG_SURFACE
-                                    };
-
-                                    let cust_id = cust.id.clone();
-                                    let cust_name = cust.name.clone();
-                                    let code_str = cust.code.clone().unwrap_or_else(|| "—".into());
-                                    let addr_str =
-                                        cust.address.clone().unwrap_or_else(|| "—".into());
-
-                                    div()
-                                        .id(("cust-row", idx))
-                                        .h(px(26.0))
-                                        .bg(rgb(bg_color))
-                                        .border_b_1()
-                                        .border_color(rgb(Theme::GRID_LINE))
-                                        .flex()
-                                        .items_center()
-                                        .cursor_pointer()
-                                        .when(!is_selected, |d| {
-                                            d.hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                                        })
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.selected_customer_id = Some(cust_id.clone());
-                                            this.current_view = CurrentView::CustomerDetail;
-                                            this.status_msg = format!(
-                                                "Membuka buku piutang pelanggan {}.",
-                                                cust_name
-                                            );
-                                            cx.notify();
-                                        }))
-                                        .child(grid_cell(
-                                            code_str,
-                                            85.0,
-                                            ColumnAlign::Center,
-                                            is_selected,
-                                        ))
-                                        .child(grid_cell(
-                                            cust.name,
-                                            260.0,
-                                            ColumnAlign::Left,
-                                            is_selected,
-                                        ))
-                                        .child(grid_cell(
-                                            addr_str,
-                                            280.0,
-                                            ColumnAlign::Left,
-                                            is_selected,
-                                        ))
-                                        .child(grid_cell(
-                                            format_idr(cust.total_outstanding_idr),
-                                            155.0,
-                                            ColumnAlign::Right,
-                                            is_selected,
-                                        ))
-                                        .child(grid_cell(
-                                            format_idr(cust.customer_credit_idr),
-                                            155.0,
-                                            ColumnAlign::Right,
-                                            is_selected,
-                                        ))
-                                        .child(if cust.active {
-                                            grid_badge(
-                                                "Aktif",
-                                                Theme::COLOR_CREDIT,
-                                                0xDCFCE7,
-                                                95.0,
-                                                is_selected,
-                                            )
+                    .child(
+                        div()
+                            .id("cust-list-scroll")
+                            .flex_1()
+                            .children(if customers.is_empty() {
+                                vec![render_empty_state("Tidak ada data pelanggan yang sesuai dengan kriteria pencarian.").into_any_element()]
+                            } else {
+                                customers
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(idx, cust)| {
+                                        let is_selected = self.selected_customer_id.as_deref() == Some(&cust.id);
+                                        let bg_color = if is_selected {
+                                            Theme::BG_ROW_SELECTED
+                                        } else if idx % 2 == 1 {
+                                            Theme::BG_ROW_ALT
                                         } else {
-                                            grid_badge(
-                                                "Nonaktif",
-                                                Theme::TEXT_MUTED,
-                                                0xF1F5F9,
-                                                95.0,
-                                                is_selected,
-                                            )
-                                        })
-                                        .into_any_element()
-                                })
-                                .collect()
-                        },
-                    )),
+                                            Theme::BG_CARD
+                                        };
+
+                                        let cust_id = cust.id.clone();
+                                        let cust_name = cust.name.clone();
+                                        let code_str = cust.code.clone().unwrap_or_else(|| "—".into());
+                                        let addr_str = cust.address.clone().unwrap_or_else(|| "—".into());
+
+                                        div()
+                                            .id(("cust-row", idx))
+                                            .h(px(32.0))
+                                            .bg(rgb(bg_color))
+                                            .border_b_1()
+                                            .border_color(rgb(Theme::GRID_LINE))
+                                            .when(is_selected, |d| {
+                                                d.border_l_2().border_color(rgb(Theme::PRIMARY))
+                                            })
+                                            .flex()
+                                            .items_center()
+                                            .cursor_pointer()
+                                            .when(!is_selected, |d| d.hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER))))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.selected_customer_id = Some(cust_id.clone());
+                                                this.current_view = CurrentView::CustomerDetail;
+                                                this.status_msg = format!("Membuka buku piutang pelanggan {}.", cust_name);
+                                                cx.notify();
+                                            }))
+                                            .child(grid_cell(code_str, 85.0, ColumnAlign::Center, is_selected))
+                                            .child(grid_cell(cust.name, 260.0, ColumnAlign::Left, is_selected))
+                                            .child(grid_cell(addr_str, 280.0, ColumnAlign::Left, is_selected))
+                                            .child(grid_cell(format_idr(cust.total_outstanding_idr), 160.0, ColumnAlign::Right, is_selected))
+                                            .child(grid_cell(format_idr(cust.customer_credit_idr), 175.0, ColumnAlign::Right, is_selected))
+                                            .child(if cust.active {
+                                                grid_badge("Aktif", Theme::BADGE_CREDIT_TEXT, Theme::BADGE_CREDIT_BG, Theme::BADGE_CREDIT_BORDER, 110.0)
+                                            } else {
+                                                grid_badge("Nonaktif", Theme::TEXT_MUTED, 0xF1F5F9, 0xE2E8F0, 110.0)
+                                            })
+                                            .into_any_element()
+                                    })
+                                    .collect()
+                            }),
+                    ),
             )
     }
 
@@ -1292,24 +1239,26 @@ impl Desktop {
         let detail_addr_str = detail
             .address
             .clone()
-            .unwrap_or_else(|| "Alamat belum tercatat".into());
+            .unwrap_or_else(|| "Alamat belum tercatat di data master".into());
 
         div()
             .flex_1()
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_WINDOW))
-            .p(px(10.0))
-            .gap(px(8.0))
-            // Header Pelanggan
+            .bg(rgb(Theme::BG_APP))
+            .p(px(12.0))
+            .gap(px(10.0))
+            // Header Pelanggan Enterprise
             .child(
                 div()
-                    .h(px(40.0))
-                    .bg(rgb(Theme::BG_SURFACE))
+                    .h(px(46.0))
+                    .bg(rgb(Theme::BG_CARD))
                     .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(10.0))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .rounded(px(6.0))
+                    .shadow_sm()
+                    .px(px(12.0))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -1317,16 +1266,16 @@ impl Desktop {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(10.0))
+                            .gap(px(12.0))
                             .child(
                                 div()
                                     .id("btn-back-to-list")
-                                    .h(px(26.0))
-                                    .px(px(8.0))
-                                    .bg(rgb(Theme::BG_WINDOW))
+                                    .h(px(28.0))
+                                    .px(px(10.0))
+                                    .bg(rgb(Theme::BG_APP))
                                     .border_1()
-                                    .border_color(rgb(Theme::BORDER_DARK))
-                                    .rounded(px(2.0))
+                                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                                    .rounded(px(4.0))
                                     .flex()
                                     .items_center()
                                     .cursor_pointer()
@@ -1338,23 +1287,42 @@ impl Desktop {
                                     .child(
                                         div()
                                             .text_size(px(11.5))
-                                            .font_weight(FontWeight::MEDIUM)
+                                            .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(rgb(Theme::TEXT_PRIMARY))
                                             .child("← Kembali (Esc)"),
                                     ),
                             )
                             .child(
                                 div()
-                                    .text_size(px(14.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child(format!("{} ({})", detail.name, detail_code_str)),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .text_color(rgb(Theme::TEXT_MUTED))
-                                    .child(detail_addr_str),
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(14.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(Theme::TEXT_PRIMARY))
+                                            .child(detail.name),
+                                    )
+                                    .child(
+                                        div()
+                                            .px(px(6.0))
+                                            .py(px(1.0))
+                                            .rounded(px(3.0))
+                                            .bg(rgb(Theme::PRIMARY_LIGHT))
+                                            .border_1()
+                                            .border_color(rgb(Theme::PRIMARY_BORDER))
+                                            .text_size(px(10.5))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(Theme::PRIMARY))
+                                            .child(detail_code_str),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.5))
+                                            .text_color(rgb(Theme::TEXT_MUTED))
+                                            .child(format!("•  {}", detail_addr_str)),
+                                    ),
                             ),
                     )
                     .child(
@@ -1364,124 +1332,77 @@ impl Desktop {
                             .gap(px(6.0))
                             .when(self.can_write(), |d| {
                                 d.child(
-                                    div()
+                                    primary_action_button("+ Penjualan Kredit", "F3")
                                         .id("btn-det-sale")
-                                        .h(px(26.0))
-                                        .px(px(10.0))
-                                        .bg(rgb(Theme::BTN_PRIMARY_BG))
-                                        .rounded(px(2.0))
-                                        .flex()
-                                        .items_center()
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(rgb(0x106EBE)))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.open_record_sale_modal();
                                             cx.notify();
-                                        }))
-                                        .child(
-                                            div()
-                                                .text_size(px(11.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(rgb(0xFFFFFF))
-                                                .child("+ Penjualan Kredit (F3)"),
-                                        ),
+                                        })),
                                 )
                                 .child(
-                                    div()
+                                    secondary_action_button("+ Catat Pembayaran", "F4")
                                         .id("btn-det-pay")
-                                        .h(px(26.0))
-                                        .px(px(10.0))
-                                        .bg(rgb(Theme::COLOR_CREDIT))
-                                        .rounded(px(2.0))
-                                        .flex()
-                                        .items_center()
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(rgb(0x166534)))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.open_record_payment_modal();
                                             cx.notify();
-                                        }))
-                                        .child(
-                                            div()
-                                                .text_size(px(11.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(rgb(0xFFFFFF))
-                                                .child("+ Catat Pembayaran (F4)"),
-                                        ),
+                                        })),
                                 )
                                 .child(
-                                    div()
+                                    secondary_action_button("Terapkan Saldo", "F5")
                                         .id("btn-det-deposit")
-                                        .h(px(26.0))
-                                        .px(px(10.0))
-                                        .bg(rgb(Theme::COLOR_DEPOSIT))
-                                        .rounded(px(2.0))
-                                        .flex()
-                                        .items_center()
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(rgb(0x1E40AF)))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.open_apply_deposit_modal();
                                             cx.notify();
-                                        }))
-                                        .child(
-                                            div()
-                                                .text_size(px(11.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(rgb(0xFFFFFF))
-                                                .child("Terapkan Saldo (F5)"),
-                                        ),
+                                        })),
                                 )
                             }),
                     ),
             )
-            // Ringkasan Saldo Pelanggan
+            // Kartu Ringkasan Saldo Pelanggan
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
-                    .child(self.balance_card(
-                        "Total Piutang Terutang",
+                    .gap(px(12.0))
+                    .child(self.enterprise_kpi_card(
+                        "TOTAL PIUTANG TERUTANG",
                         format!("Rp {}", format_idr(detail.total_outstanding_idr)),
-                        "Saldo kewajiban piutang dari buku piutang",
-                        Theme::COLOR_DEBIT,
+                        "Kewajiban tagihan belanja kredit berjalan",
+                        Theme::BADGE_DEBIT_TEXT,
+                        Theme::BADGE_DEBIT_BORDER,
                     ))
-                    .child(self.balance_card(
-                        "Saldo Kredit Pelanggan (Deposit)",
+                    .child(self.enterprise_kpi_card(
+                        "SALDO KREDIT (DEPOSIT)",
                         format!("Rp {}", format_idr(detail.customer_credit_idr)),
-                        "Kelebihan pembayaran yang dapat diterapkan ke transaksi piutang",
-                        Theme::COLOR_DEPOSIT,
+                        "Kelebihan pembayaran yang dapat diterapkan ke transaksi",
+                        Theme::PRIMARY,
+                        Theme::PRIMARY_BORDER,
                     )),
             )
-            // Tab Selector
+            // Segmented Tab Selector Enterprise
             .child(
                 div()
-                    .h(px(30.0))
-                    .border_b_1()
-                    .border_color(rgb(Theme::GRID_LINE))
+                    .h(px(34.0))
                     .flex()
                     .items_center()
-                    .gap(px(4.0))
+                    .gap(px(8.0))
                     .child(
                         div()
                             .id("tab-btn-ledger")
-                            .h(px(30.0))
-                            .px(px(12.0))
+                            .h(px(32.0))
+                            .px(px(14.0))
                             .bg(rgb(if self.customer_tab == CustomerTab::Ledger {
-                                Theme::BG_SURFACE
+                                Theme::PRIMARY_LIGHT
                             } else {
-                                Theme::BG_WINDOW
+                                Theme::BG_CARD
                             }))
-                            .border_t_2()
-                            .border_l_1()
-                            .border_r_1()
+                            .border_1()
                             .border_color(rgb(if self.customer_tab == CustomerTab::Ledger {
-                                Theme::GRID_LINE
+                                Theme::PRIMARY_BORDER
                             } else {
-                                Theme::BG_WINDOW
+                                Theme::BORDER_DEFAULT
                             }))
-                            .rounded_t(px(3.0))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
@@ -1491,14 +1412,14 @@ impl Desktop {
                             }))
                             .child(
                                 div()
-                                    .text_size(px(11.5))
+                                    .text_size(px(12.0))
                                     .font_weight(if self.customer_tab == CustomerTab::Ledger {
                                         FontWeight::BOLD
                                     } else {
                                         FontWeight::MEDIUM
                                     })
                                     .text_color(rgb(if self.customer_tab == CustomerTab::Ledger {
-                                        Theme::TEXT_PRIMARY
+                                        Theme::PRIMARY
                                     } else {
                                         Theme::TEXT_SECONDARY
                                     }))
@@ -1508,22 +1429,20 @@ impl Desktop {
                     .child(
                         div()
                             .id("tab-btn-payments")
-                            .h(px(30.0))
-                            .px(px(12.0))
+                            .h(px(32.0))
+                            .px(px(14.0))
                             .bg(rgb(if self.customer_tab == CustomerTab::Payments {
-                                Theme::BG_SURFACE
+                                Theme::PRIMARY_LIGHT
                             } else {
-                                Theme::BG_WINDOW
+                                Theme::BG_CARD
                             }))
-                            .border_t_2()
-                            .border_l_1()
-                            .border_r_1()
+                            .border_1()
                             .border_color(rgb(if self.customer_tab == CustomerTab::Payments {
-                                Theme::GRID_LINE
+                                Theme::PRIMARY_BORDER
                             } else {
-                                Theme::BG_WINDOW
+                                Theme::BORDER_DEFAULT
                             }))
-                            .rounded_t(px(3.0))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
@@ -1533,7 +1452,7 @@ impl Desktop {
                             }))
                             .child(
                                 div()
-                                    .text_size(px(11.5))
+                                    .text_size(px(12.0))
                                     .font_weight(if self.customer_tab == CustomerTab::Payments {
                                         FontWeight::BOLD
                                     } else {
@@ -1541,7 +1460,7 @@ impl Desktop {
                                     })
                                     .text_color(rgb(
                                         if self.customer_tab == CustomerTab::Payments {
-                                            Theme::TEXT_PRIMARY
+                                            Theme::PRIMARY
                                         } else {
                                             Theme::TEXT_SECONDARY
                                         },
@@ -1560,67 +1479,69 @@ impl Desktop {
     fn render_ledger_grid(&self, ledger: &[LedgerEntry], cx: &mut Context<Self>) -> Div {
         let columns = vec![
             GridColumn {
-                title: "Tanggal",
-                width_px: 90.0,
+                title: "TANGGAL",
+                width_px: 95.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "Uraian Transaksi",
+                title: "URAIAN TRANSAKSI",
                 width_px: 240.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Qty",
-                width_px: 55.0,
+                title: "QTY",
+                width_px: 60.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Harga (Rp)",
+                title: "HARGA (RP)",
                 width_px: 95.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Debet (Rp)",
+                title: "DEBET (RP)",
                 width_px: 110.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Kredit (Rp)",
+                title: "KREDIT (RP)",
                 width_px: 110.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Saldo (Rp)",
+                title: "SALDO (RP)",
                 width_px: 120.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Status",
-                width_px: 85.0,
-                align: ColumnAlign::Center,
-            },
-            GridColumn {
-                title: "Sisa (Rp)",
-                width_px: 100.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "Umur",
+                title: "STATUS",
                 width_px: 90.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "Aksi",
-                width_px: 75.0,
+                title: "SISA (RP)",
+                width_px: 105.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "UMUR",
+                width_px: 95.0,
+                align: ColumnAlign::Center,
+            },
+            GridColumn {
+                title: "AKSI",
+                width_px: 80.0,
                 align: ColumnAlign::Center,
             },
         ];
 
         div()
             .flex_1()
-            .bg(rgb(Theme::BG_SURFACE))
+            .bg(rgb(Theme::BG_CARD))
             .border_1()
-            .border_color(rgb(Theme::GRID_LINE))
+            .border_color(rgb(Theme::BORDER_DEFAULT))
+            .rounded(px(6.0))
+            .shadow_sm()
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -1632,7 +1553,7 @@ impl Desktop {
                     .children(if ledger.is_empty() {
                         vec![
                             render_empty_state(
-                                "Belum ada mutasi buku piutang untuk pelanggan ini.",
+                                "Belum ada mutasi buku piutang tercatat untuk pelanggan ini.",
                             )
                             .into_any_element(),
                         ]
@@ -1645,7 +1566,7 @@ impl Desktop {
                                 let bg_color = if is_odd {
                                     Theme::BG_ROW_ALT
                                 } else {
-                                    Theme::BG_SURFACE
+                                    Theme::BG_CARD
                                 };
                                 let entry_id = entry.id.clone();
                                 let is_rev = entry.is_reversed;
@@ -1661,15 +1582,15 @@ impl Desktop {
 
                                 div()
                                     .id(("ledg-row", idx))
-                                    .h(px(26.0))
+                                    .h(px(32.0))
                                     .bg(rgb(bg_color))
                                     .border_b_1()
                                     .border_color(rgb(Theme::GRID_LINE))
                                     .flex()
                                     .items_center()
-                                    .child(grid_cell(date_str, 90.0, ColumnAlign::Center, false))
+                                    .child(grid_cell(date_str, 95.0, ColumnAlign::Center, false))
                                     .child(grid_cell(desc_str, 240.0, ColumnAlign::Left, false))
-                                    .child(grid_cell(qty_str, 55.0, ColumnAlign::Right, false))
+                                    .child(grid_cell(qty_str, 60.0, ColumnAlign::Right, false))
                                     .child(grid_cell(price_str, 95.0, ColumnAlign::Right, false))
                                     .child(grid_cell(
                                         if entry.debit_idr > 0 {
@@ -1700,28 +1621,28 @@ impl Desktop {
                                     .child(match entry.allocation_status {
                                         Some(AllocationStatus::Allocated) => grid_badge(
                                             "Lunas",
-                                            Theme::COLOR_CREDIT,
-                                            0xDCFCE7,
-                                            85.0,
-                                            false,
+                                            Theme::BADGE_CREDIT_TEXT,
+                                            Theme::BADGE_CREDIT_BG,
+                                            Theme::BADGE_CREDIT_BORDER,
+                                            90.0,
                                         ),
                                         Some(AllocationStatus::PartiallyAllocated) => grid_badge(
                                             "Sebagian",
-                                            Theme::COLOR_WARNING,
-                                            0xFEF3C7,
-                                            85.0,
-                                            false,
+                                            Theme::BADGE_WARNING_TEXT,
+                                            Theme::BADGE_WARNING_BG,
+                                            Theme::BADGE_WARNING_BORDER,
+                                            90.0,
                                         ),
                                         Some(AllocationStatus::Unallocated) => grid_badge(
                                             "Belum",
-                                            Theme::COLOR_DEBIT,
-                                            0xFEE2E2,
-                                            85.0,
-                                            false,
+                                            Theme::BADGE_DEBIT_TEXT,
+                                            Theme::BADGE_DEBIT_BG,
+                                            Theme::BADGE_DEBIT_BORDER,
+                                            90.0,
                                         ),
                                         None => grid_cell(
                                             "—".to_string(),
-                                            85.0,
+                                            90.0,
                                             ColumnAlign::Center,
                                             false,
                                         ),
@@ -1732,7 +1653,7 @@ impl Desktop {
                                         } else {
                                             "—".into()
                                         },
-                                        100.0,
+                                        105.0,
                                         ColumnAlign::Right,
                                         false,
                                     ))
@@ -1748,13 +1669,13 @@ impl Desktop {
                                             },
                                             None => "—".to_string(),
                                         },
-                                        90.0,
+                                        95.0,
                                         ColumnAlign::Center,
                                         false,
                                     ))
                                     .child(
                                         div()
-                                            .w(px(75.0))
+                                            .w(px(80.0))
                                             .h_full()
                                             .flex()
                                             .items_center()
@@ -1764,11 +1685,11 @@ impl Desktop {
                                                     div()
                                                         .id(("rev-btn", idx))
                                                         .px(px(6.0))
-                                                        .py(px(1.0))
-                                                        .bg(rgb(Theme::BG_WINDOW))
+                                                        .py(px(2.0))
+                                                        .bg(rgb(Theme::BG_CARD))
                                                         .border_1()
-                                                        .border_color(rgb(Theme::BORDER_DARK))
-                                                        .rounded(px(2.0))
+                                                        .border_color(rgb(0xFCA5A5))
+                                                        .rounded(px(3.0))
                                                         .cursor_pointer()
                                                         .hover(|d| d.bg(rgb(0xFEE2E2)))
                                                         .on_click(cx.listener(
@@ -1779,8 +1700,11 @@ impl Desktop {
                                                         ))
                                                         .child(
                                                             div()
-                                                                .text_size(px(10.0))
-                                                                .text_color(rgb(Theme::COLOR_DEBIT))
+                                                                .text_size(px(10.5))
+                                                                .font_weight(FontWeight::BOLD)
+                                                                .text_color(rgb(
+                                                                    Theme::BADGE_DEBIT_TEXT,
+                                                                ))
                                                                 .child("Koreksi"),
                                                         ),
                                                 )
@@ -1788,8 +1712,8 @@ impl Desktop {
                                             .when(is_rev, |d| {
                                                 d.child(
                                                     div()
-                                                        .text_size(px(10.0))
-                                                        .text_color(rgb(Theme::TEXT_MUTED))
+                                                        .text_size(px(10.5))
+                                                        .text_color(rgb(Theme::TEXT_LIGHT))
                                                         .child("(Batal)"),
                                                 )
                                             }),
@@ -1804,37 +1728,37 @@ impl Desktop {
     fn render_payments_grid(&self, payments: &[PaymentRow]) -> Div {
         let columns = vec![
             GridColumn {
-                title: "Tanggal Terima",
-                width_px: 110.0,
+                title: "TANGGAL TERIMA",
+                width_px: 120.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "Metode",
-                width_px: 100.0,
+                title: "METODE BAYAR",
+                width_px: 110.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Nomor Referensi",
-                width_px: 140.0,
+                title: "NOMOR REFERENSI",
+                width_px: 150.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Nominal Bayar (Rp)",
+                title: "NOMINAL BAYAR",
                 width_px: 145.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Teralokasi (Rp)",
+                title: "TERALOKASI",
                 width_px: 140.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Sisa Saldo Kredit (Rp)",
+                title: "SISA SALDO KREDIT",
                 width_px: 160.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "Catatan Pembayaran",
+                title: "CATATAN PEMBAYARAN",
                 width_px: 260.0,
                 align: ColumnAlign::Left,
             },
@@ -1842,9 +1766,11 @@ impl Desktop {
 
         div()
             .flex_1()
-            .bg(rgb(Theme::BG_SURFACE))
+            .bg(rgb(Theme::BG_CARD))
             .border_1()
-            .border_color(rgb(Theme::GRID_LINE))
+            .border_color(rgb(Theme::BORDER_DEFAULT))
+            .rounded(px(6.0))
+            .shadow_sm()
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -1855,7 +1781,7 @@ impl Desktop {
                     .flex_1()
                     .children(if payments.is_empty() {
                         vec![
-                            render_empty_state("Belum ada riwayat pembayaran untuk pelanggan ini.")
+                            render_empty_state("Belum ada riwayat pembayaran yang tercatat.")
                                 .into_any_element(),
                         ]
                     } else {
@@ -1867,7 +1793,7 @@ impl Desktop {
                                 let bg_color = if is_odd {
                                     Theme::BG_ROW_ALT
                                 } else {
-                                    Theme::BG_SURFACE
+                                    Theme::BG_CARD
                                 };
 
                                 let date_str = p.received_date.format("%d %b %Y").to_string();
@@ -1877,15 +1803,15 @@ impl Desktop {
 
                                 div()
                                     .id(("pay-row", idx))
-                                    .h(px(26.0))
+                                    .h(px(32.0))
                                     .bg(rgb(bg_color))
                                     .border_b_1()
                                     .border_color(rgb(Theme::GRID_LINE))
                                     .flex()
                                     .items_center()
-                                    .child(grid_cell(date_str, 110.0, ColumnAlign::Center, false))
-                                    .child(grid_cell(method_str, 100.0, ColumnAlign::Left, false))
-                                    .child(grid_cell(ref_str, 140.0, ColumnAlign::Left, false))
+                                    .child(grid_cell(date_str, 120.0, ColumnAlign::Center, false))
+                                    .child(grid_cell(method_str, 110.0, ColumnAlign::Left, false))
+                                    .child(grid_cell(ref_str, 150.0, ColumnAlign::Left, false))
                                     .child(grid_cell(
                                         format_idr(p.amount_idr),
                                         145.0,
@@ -1920,43 +1846,43 @@ impl Desktop {
 
         let columns = vec![
             GridColumn {
-                title: "Kode",
-                width_px: 80.0,
+                title: "KODE",
+                width_px: 85.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "Nama Pelanggan",
+                title: "NAMA PELANGGAN",
                 width_px: 240.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Total Terutang (Rp)",
-                width_px: 145.0,
+                title: "TOTAL TERUTANG",
+                width_px: 150.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "0 - 15 Hari",
+                title: "0 - 15 HARI",
                 width_px: 115.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "16 - 30 Hari",
+                title: "16 - 30 HARI",
                 width_px: 115.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "31 - 45 Hari",
+                title: "31 - 45 HARI",
                 width_px: 115.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "46 - 60 Hari",
+                title: "46 - 60 HARI",
                 width_px: 115.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "> 60 Hari",
-                width_px: 120.0,
+                title: "> 60 HARI",
+                width_px: 125.0,
                 align: ColumnAlign::Right,
             },
         ];
@@ -1979,16 +1905,19 @@ impl Desktop {
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_WINDOW))
-            .p(px(10.0))
-            .gap(px(8.0))
+            .bg(rgb(Theme::BG_APP))
+            .p(px(12.0))
+            .gap(px(10.0))
+            // Header Aging
             .child(
                 div()
-                    .h(px(36.0))
-                    .bg(rgb(Theme::BG_SURFACE))
+                    .h(px(42.0))
+                    .bg(rgb(Theme::BG_CARD))
                     .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(10.0))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .rounded(px(6.0))
+                    .shadow_sm()
+                    .px(px(12.0))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -1999,104 +1928,93 @@ impl Desktop {
                             .gap(px(8.0))
                             .child(
                                 div()
-                                    .text_size(px(13.0))
+                                    .text_size(px(14.0))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child("Laporan Analisis Umur Piutang (Aging)"),
+                                    .child("Laporan Analisis Umur Piutang (Aging Buckets)"),
                             )
                             .child(
                                 div()
                                     .text_size(px(11.5))
                                     .text_color(rgb(Theme::TEXT_MUTED))
                                     .child(format!(
-                                        "Per Tanggal: {}",
+                                        "•  Acuan: {}",
                                         report.as_of.format("%d %B %Y")
                                     )),
                             ),
                     )
                     .child(
-                        div()
+                        secondary_action_button("Ubah Tanggal Acuan...", "")
                             .id("btn-change-aging-date")
-                            .h(px(24.0))
-                            .px(px(8.0))
-                            .bg(rgb(Theme::BG_WINDOW))
-                            .border_1()
-                            .border_color(rgb(Theme::BORDER_DARK))
-                            .rounded(px(2.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_change_as_of_modal();
                                 cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child("Ubah Tanggal Acuan..."),
-                            ),
+                            })),
                     ),
             )
-            // Bucket Cards
+            // Bucket Cards Enterprise
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.0))
-                    .child(self.aging_card(
+                    .gap(px(8.0))
+                    .child(self.enterprise_aging_card(
                         "aging-c-all",
-                        "Total Terbuka",
+                        "TOTAL TERBUKA",
                         format!("Rp {}", format_idr(report.total_open_idr)),
                         self.aging_selected_bucket.is_none(),
-                        Theme::COLOR_DEBIT,
+                        Theme::TEXT_PRIMARY,
+                        0x0F172A,
                         cx,
                         None,
                     ))
-                    .child(self.aging_card(
+                    .child(self.enterprise_aging_card(
                         "aging-c-0",
-                        "0-15 Hari (Lancar)",
+                        "0 - 15 HARI (LANCAR)",
                         format!("Rp {}", format_idr(report.days_0_15)),
                         self.aging_selected_bucket == Some(0),
-                        Theme::COLOR_CREDIT,
+                        Theme::BADGE_CREDIT_TEXT,
+                        Theme::BADGE_CREDIT_BORDER,
                         cx,
                         Some(0),
                     ))
-                    .child(self.aging_card(
+                    .child(self.enterprise_aging_card(
                         "aging-c-1",
-                        "16-30 Hari",
+                        "16 - 30 HARI",
                         format!("Rp {}", format_idr(report.days_16_30)),
                         self.aging_selected_bucket == Some(1),
-                        Theme::COLOR_WARNING,
+                        Theme::BADGE_WARNING_TEXT,
+                        Theme::BADGE_WARNING_BORDER,
                         cx,
                         Some(1),
                     ))
-                    .child(self.aging_card(
+                    .child(self.enterprise_aging_card(
                         "aging-c-2",
-                        "31-45 Hari",
+                        "31 - 45 HARI",
                         format!("Rp {}", format_idr(report.days_31_45)),
                         self.aging_selected_bucket == Some(2),
-                        Theme::COLOR_WARNING,
+                        Theme::BADGE_WARNING_TEXT,
+                        Theme::BADGE_WARNING_BORDER,
                         cx,
                         Some(2),
                     ))
-                    .child(self.aging_card(
+                    .child(self.enterprise_aging_card(
                         "aging-c-3",
-                        "46-60 Hari",
+                        "46 - 60 HARI",
                         format!("Rp {}", format_idr(report.days_46_60)),
                         self.aging_selected_bucket == Some(3),
-                        Theme::COLOR_DEBIT,
+                        Theme::BADGE_DEBIT_TEXT,
+                        Theme::BADGE_DEBIT_BORDER,
                         cx,
                         Some(3),
                     ))
-                    .child(self.aging_card(
+                    .child(self.enterprise_aging_card(
                         "aging-c-4",
-                        "> 60 Hari (Menunggak)",
+                        "> 60 HARI (MENUNGGAK)",
                         format!("Rp {}", format_idr(report.days_over_60)),
                         self.aging_selected_bucket == Some(4),
-                        0x7F1D1D,
+                        Theme::BADGE_CRITICAL_TEXT,
+                        Theme::BADGE_CRITICAL_BORDER,
                         cx,
                         Some(4),
                     )),
@@ -2105,9 +2023,11 @@ impl Desktop {
             .child(
                 div()
                     .flex_1()
-                    .bg(rgb(Theme::BG_SURFACE))
+                    .bg(rgb(Theme::BG_CARD))
                     .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .rounded(px(6.0))
+                    .shadow_sm()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
@@ -2129,7 +2049,7 @@ impl Desktop {
                                     let bg_color = if is_odd {
                                         Theme::BG_ROW_ALT
                                     } else {
-                                        Theme::BG_SURFACE
+                                        Theme::BG_CARD
                                     };
                                     let cid = c.customer_id.clone();
                                     let cname = c.customer_name.clone();
@@ -2137,7 +2057,7 @@ impl Desktop {
 
                                     div()
                                         .id(("ag-row", idx))
-                                        .h(px(26.0))
+                                        .h(px(32.0))
                                         .bg(rgb(bg_color))
                                         .border_b_1()
                                         .border_color(rgb(Theme::GRID_LINE))
@@ -2156,7 +2076,7 @@ impl Desktop {
                                         }))
                                         .child(grid_cell(
                                             code_str,
-                                            80.0,
+                                            85.0,
                                             ColumnAlign::Center,
                                             false,
                                         ))
@@ -2168,7 +2088,7 @@ impl Desktop {
                                         ))
                                         .child(grid_cell(
                                             format_idr(c.total_outstanding_idr),
-                                            145.0,
+                                            150.0,
                                             ColumnAlign::Right,
                                             false,
                                         ))
@@ -2218,7 +2138,7 @@ impl Desktop {
                                             } else {
                                                 "—".into()
                                             },
-                                            120.0,
+                                            125.0,
                                             ColumnAlign::Right,
                                             false,
                                         ))
@@ -2234,32 +2154,32 @@ impl Desktop {
         let users = self.store.list_users().unwrap_or_default();
         let columns = vec![
             GridColumn {
-                title: "Username",
+                title: "USERNAME",
                 width_px: 130.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Nama Lengkap",
+                title: "NAMA LENGKAP",
                 width_px: 240.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "Peran / Otorisasi",
-                width_px: 130.0,
-                align: ColumnAlign::Center,
-            },
-            GridColumn {
-                title: "Status",
-                width_px: 95.0,
-                align: ColumnAlign::Center,
-            },
-            GridColumn {
-                title: "Perlu Ganti Sandi",
+                title: "PERAN / OTORISASI",
                 width_px: 140.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "Aksi Akun",
+                title: "STATUS AKUN",
+                width_px: 110.0,
+                align: ColumnAlign::Center,
+            },
+            GridColumn {
+                title: "KEWAJIBAN SANDI",
+                width_px: 140.0,
+                align: ColumnAlign::Center,
+            },
+            GridColumn {
+                title: "AKSI KELOLA",
                 width_px: 180.0,
                 align: ColumnAlign::Center,
             },
@@ -2270,16 +2190,18 @@ impl Desktop {
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_WINDOW))
-            .p(px(10.0))
-            .gap(px(8.0))
+            .bg(rgb(Theme::BG_APP))
+            .p(px(12.0))
+            .gap(px(10.0))
             .child(
                 div()
-                    .h(px(36.0))
-                    .bg(rgb(Theme::BG_SURFACE))
+                    .h(px(42.0))
+                    .bg(rgb(Theme::BG_CARD))
                     .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(10.0))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .rounded(px(6.0))
+                    .shadow_sm()
+                    .px(px(12.0))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -2290,48 +2212,29 @@ impl Desktop {
                             .gap(px(8.0))
                             .child(
                                 div()
-                                    .text_size(px(13.0))
+                                    .text_size(px(14.0))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child("Manajemen Pengguna Aplikasi (Owner Only)"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(Theme::TEXT_MUTED))
-                                    .child("Kelola akun operator dan kewenangan akses sistem"),
+                                    .child("Manajemen Akun & Otorisasi Pengguna (Owner Only)"),
                             ),
                     )
                     .child(
-                        div()
+                        primary_action_button("+ Tambah Pengguna Baru", "")
                             .id("btn-add-user-mgr")
-                            .h(px(24.0))
-                            .px(px(10.0))
-                            .bg(rgb(Theme::BTN_PRIMARY_BG))
-                            .rounded(px(2.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(0x106EBE)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_new_user_modal();
                                 cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(0xFFFFFF))
-                                    .child("+ Tambah Pengguna Baru"),
-                            ),
+                            })),
                     ),
             )
             .child(
                 div()
                     .flex_1()
-                    .bg(rgb(Theme::BG_SURFACE))
+                    .bg(rgb(Theme::BG_CARD))
                     .border_1()
-                    .border_color(rgb(Theme::GRID_LINE))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .rounded(px(6.0))
+                    .shadow_sm()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
@@ -2342,7 +2245,7 @@ impl Desktop {
                             .flex_1()
                             .children(users.into_iter().enumerate().map(|(idx, u)| {
                                 let is_odd = idx % 2 == 1;
-                                let bg_color = if is_odd { Theme::BG_ROW_ALT } else { Theme::BG_SURFACE };
+                                let bg_color = if is_odd { Theme::BG_ROW_ALT } else { Theme::BG_CARD };
                                 let uid = u.id.clone();
                                 let uid_toggle = u.id.clone();
                                 let is_act = u.active;
@@ -2350,7 +2253,7 @@ impl Desktop {
 
                                 div()
                                     .id(("u-row", idx))
-                                    .h(px(28.0))
+                                    .h(px(32.0))
                                     .bg(rgb(bg_color))
                                     .border_b_1()
                                     .border_color(rgb(Theme::GRID_LINE))
@@ -2358,17 +2261,17 @@ impl Desktop {
                                     .items_center()
                                     .child(grid_cell(u.username, 130.0, ColumnAlign::Left, false))
                                     .child(grid_cell(u.full_name.clone(), 240.0, ColumnAlign::Left, false))
-                                    .child(grid_cell(match u.role {
-                                        UserRole::Owner => "Owner",
-                                        UserRole::Operator => "Operator",
-                                        UserRole::Viewer => "Viewer",
-                                    }, 130.0, ColumnAlign::Center, false))
-                                    .child(if u.active {
-                                        grid_badge("Aktif", Theme::COLOR_CREDIT, 0xDCFCE7, 95.0, false)
-                                    } else {
-                                        grid_badge("Nonaktif", Theme::COLOR_DEBIT, 0xFEE2E2, 95.0, false)
+                                    .child(match u.role {
+                                        UserRole::Owner => grid_badge("OWNER", 0x1E40AF, 0xDBEAFE, 0x93C5FD, 140.0),
+                                        UserRole::Operator => grid_badge("OPERATOR", Theme::PRIMARY, Theme::PRIMARY_LIGHT, Theme::PRIMARY_BORDER, 140.0),
+                                        UserRole::Viewer => grid_badge("VIEWER", Theme::TEXT_MUTED, 0xF1F5F9, 0xE2E8F0, 140.0),
                                     })
-                                    .child(grid_cell(if u.must_change_password { "Ya (Wajib)" } else { "Tidak" }, 140.0, ColumnAlign::Center, false))
+                                    .child(if u.active {
+                                        grid_badge("Aktif", Theme::BADGE_CREDIT_TEXT, Theme::BADGE_CREDIT_BG, Theme::BADGE_CREDIT_BORDER, 110.0)
+                                    } else {
+                                        grid_badge("Nonaktif", Theme::TEXT_MUTED, 0xF1F5F9, 0xE2E8F0, 110.0)
+                                    })
+                                    .child(grid_cell(if u.must_change_password { "Wajib Ganti" } else { "Terverifikasi" }, 140.0, ColumnAlign::Center, false))
                                     .child(
                                         div()
                                             .w(px(180.0))
@@ -2380,12 +2283,12 @@ impl Desktop {
                                             .child(
                                                 div()
                                                     .id(("rst-btn", idx))
-                                                    .px(px(6.0))
+                                                    .px(px(8.0))
                                                     .py(px(2.0))
-                                                    .bg(rgb(Theme::BG_WINDOW))
+                                                    .bg(rgb(Theme::BG_CARD))
                                                     .border_1()
-                                                    .border_color(rgb(Theme::BORDER_DARK))
-                                                    .rounded(px(2.0))
+                                                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                                                    .rounded(px(3.0))
                                                     .cursor_pointer()
                                                     .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
                                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2402,19 +2305,19 @@ impl Desktop {
                                                         }
                                                         cx.notify();
                                                     }))
-                                                    .child(div().text_size(px(10.5)).text_color(rgb(Theme::TEXT_PRIMARY)).child("Reset Sandi")),
+                                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::MEDIUM).text_color(rgb(Theme::TEXT_PRIMARY)).child("Reset Sandi")),
                                             )
                                             .child(
                                                 div()
                                                     .id(("tgl-btn", idx))
-                                                    .px(px(6.0))
+                                                    .px(px(8.0))
                                                     .py(px(2.0))
-                                                    .bg(rgb(Theme::BG_WINDOW))
+                                                    .bg(rgb(Theme::BG_CARD))
                                                     .border_1()
-                                                    .border_color(rgb(Theme::BORDER_DARK))
-                                                    .rounded(px(2.0))
+                                                    .border_color(rgb(if is_act { Theme::BADGE_DEBIT_BORDER } else { Theme::BADGE_CREDIT_BORDER }))
+                                                    .rounded(px(3.0))
                                                     .cursor_pointer()
-                                                    .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+                                                    .hover(|d| d.bg(rgb(if is_act { Theme::BADGE_DEBIT_BG } else { Theme::BADGE_CREDIT_BG })))
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         let up = UpdateUserInput {
                                                             full_name: u.full_name.clone(),
@@ -2428,7 +2331,7 @@ impl Desktop {
                                                         }
                                                         cx.notify();
                                                     }))
-                                                    .child(div().text_size(px(10.5)).text_color(rgb(if is_act { Theme::COLOR_DEBIT } else { Theme::COLOR_CREDIT })).child(if is_act { "Nonaktifkan" } else { "Aktifkan" })),
+                                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(if is_act { Theme::BADGE_DEBIT_TEXT } else { Theme::BADGE_CREDIT_TEXT })).child(if is_act { "Nonaktifkan" } else { "Aktifkan" })),
                                             ),
                                     )
                                     .into_any_element()
@@ -2437,47 +2340,25 @@ impl Desktop {
             )
     }
 
-    fn kpi_card(&self, title: &'static str, value: String, color_hex: u32) -> Div {
-        div()
-            .flex_1()
-            .h(px(56.0))
-            .bg(rgb(Theme::BG_SURFACE))
-            .border_1()
-            .border_color(rgb(Theme::GRID_LINE))
-            .p(px(8.0))
-            .flex()
-            .flex_col()
-            .justify_between()
-            .child(
-                div()
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(Theme::TEXT_SECONDARY))
-                    .child(title),
-            )
-            .child(
-                div()
-                    .text_size(px(16.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(color_hex))
-                    .child(value),
-            )
-    }
-
-    fn balance_card(
+    fn enterprise_kpi_card(
         &self,
         title: &'static str,
-        amount: String,
+        value: String,
         subtitle: &'static str,
         color_hex: u32,
+        border_hex: u32,
     ) -> Div {
         div()
             .flex_1()
             .h(px(64.0))
-            .bg(rgb(Theme::BG_SURFACE))
+            .bg(rgb(Theme::BG_CARD))
             .border_1()
-            .border_color(rgb(Theme::GRID_LINE))
-            .p(px(8.0))
+            .border_color(rgb(Theme::BORDER_DEFAULT))
+            .border_l_4()
+            .border_color(rgb(border_hex))
+            .p(px(10.0))
+            .rounded(px(6.0))
+            .shadow_sm()
             .flex()
             .flex_col()
             .justify_between()
@@ -2488,54 +2369,59 @@ impl Desktop {
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(Theme::TEXT_SECONDARY))
+                            .text_size(px(10.5))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(Theme::TEXT_MUTED))
                             .child(title),
                     )
                     .child(
                         div()
-                            .text_size(px(16.0))
+                            .text_size(px(15.5))
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(color_hex))
-                            .child(amount),
+                            .child(value),
                     ),
             )
             .child(
                 div()
                     .text_size(px(10.5))
-                    .text_color(rgb(Theme::TEXT_MUTED))
+                    .text_color(rgb(Theme::TEXT_LIGHT))
                     .child(subtitle),
             )
     }
 
-    fn aging_card(
+    #[allow(clippy::too_many_arguments)]
+    fn enterprise_aging_card(
         &self,
         id: &'static str,
         label: &'static str,
         amount: String,
         is_active: bool,
         color_hex: u32,
+        border_hex: u32,
         cx: &mut Context<Self>,
         bucket: Option<usize>,
     ) -> impl IntoElement {
         div()
             .id(id)
             .flex_1()
-            .h(px(52.0))
+            .h(px(56.0))
             .bg(rgb(if is_active {
-                0xFFFFFF
+                Theme::PRIMARY_LIGHT
             } else {
-                Theme::BG_SURFACE
+                Theme::BG_CARD
             }))
-            .border_2()
+            .border_1()
             .border_color(rgb(if is_active {
-                Theme::BG_ROW_SELECTED
+                Theme::PRIMARY
             } else {
-                Theme::GRID_LINE
+                Theme::BORDER_DEFAULT
             }))
-            .p(px(6.0))
-            .rounded(px(3.0))
+            .border_t_2()
+            .border_color(rgb(border_hex))
+            .p(px(8.0))
+            .rounded(px(5.0))
+            .shadow_sm()
             .flex()
             .flex_col()
             .justify_between()
@@ -2548,8 +2434,8 @@ impl Desktop {
             .child(
                 div()
                     .text_size(px(10.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(Theme::TEXT_SECONDARY))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(Theme::TEXT_MUTED))
                     .child(label),
             )
             .child(
@@ -2569,39 +2455,39 @@ impl Desktop {
                 let msg = message.clone();
                 let dialog = ModalDialog::new(title, 420.0);
                 let body = div()
-                    .p(px(8.0))
-                    .text_size(px(12.0))
+                    .p(px(12.0))
+                    .text_size(px(12.5))
                     .text_color(rgb(Theme::TEXT_PRIMARY))
                     .child(msg)
                     .into_any_element();
                 let footer = div()
-                    .h(px(40.0))
+                    .h(px(46.0))
                     .bg(rgb(Theme::BG_HEADER))
                     .border_t_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(10.0))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .px(px(14.0))
                     .flex()
                     .items_center()
                     .justify_end()
                     .child(
                         div()
                             .id("btn-notice-ok")
-                            .h(px(26.0))
-                            .px(px(14.0))
-                            .bg(rgb(Theme::BTN_PRIMARY_BG))
-                            .rounded(px(2.0))
+                            .h(px(28.0))
+                            .px(px(16.0))
+                            .bg(rgb(Theme::PRIMARY))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
-                            .hover(|d| d.bg(rgb(0x106EBE)))
+                            .hover(|d| d.bg(rgb(Theme::PRIMARY_HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.active_modal = None;
                                 cx.notify();
                             }))
                             .child(
                                 div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(0xFFFFFF))
                                     .child("OK (Enter)"),
                             ),
@@ -2624,10 +2510,10 @@ impl Desktop {
                     }
                 }
 
-                let dialog = ModalDialog::new("Penjualan Kredit Baru (Multi-Item)", 620.0);
+                let dialog = ModalDialog::new("Faktur Penjualan Kredit (Multi-Item)", 640.0);
                 let date_val = self
                     .form_fields
-                    .get(0)
+                    .first()
                     .map(|f| f.1.clone())
                     .unwrap_or_default();
                 let reason_val = self
@@ -2640,64 +2526,83 @@ impl Desktop {
                 let body = div()
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
+                    .gap(px(12.0))
+                    // Header Informasi Pelanggan
                     .child(
                         div()
-                            .p(px(8.0))
-                            .bg(rgb(Theme::BG_SURFACE))
+                            .p(px(10.0))
+                            .bg(rgb(Theme::BG_APP))
                             .border_1()
-                            .border_color(rgb(Theme::GRID_LINE))
+                            .border_color(rgb(Theme::BORDER_DEFAULT))
+                            .rounded(px(5.0))
                             .flex()
                             .items_center()
                             .justify_between()
-                            .child(div().text_size(px(12.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(format!("Pelanggan: {} ({})", cust.name, cust_code_str)))
-                            .child(div().text_size(px(11.5)).text_color(rgb(Theme::COLOR_DEPOSIT)).child(format!("Saldo Deposit: Rp {}", format_idr(deposit_avail)))),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(div().text_size(px(12.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(cust.name))
+                                    .child(div().px(px(6.0)).py(px(1.0)).rounded(px(3.0)).bg(rgb(Theme::PRIMARY_LIGHT)).text_size(px(10.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::PRIMARY)).child(cust_code_str)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.5))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(Theme::PRIMARY))
+                                    .child(format!("Saldo Deposit: Rp {}", format_idr(deposit_avail))),
+                            ),
                     )
+                    // Input Tanggal & Alasan
                     .child(
                         div()
                             .flex()
-                            .gap(px(8.0))
+                            .gap(px(10.0))
                             .child(
                                 div()
                                     .flex_1()
                                     .flex()
                                     .flex_col()
-                                    .gap(px(2.0))
-                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).child("Tanggal (YYYY-MM-DD):"))
-                                    .child(div().h(px(24.0)).bg(rgb(0xFFFFFF)).border_1().border_color(rgb(Theme::BORDER_DARK)).px(px(6.0)).flex().items_center().text_size(px(11.5)).child(date_val)),
+                                    .gap(px(3.0))
+                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_MUTED)).child("TANGGAL TRANSAKSI (YYYY-MM-DD):"))
+                                    .child(div().h(px(28.0)).bg(rgb(0xFFFFFF)).border_1().border_color(rgb(Theme::BORDER_STRONG)).rounded(px(4.0)).px(px(8.0)).flex().items_center().text_size(px(12.0)).child(date_val)),
                             )
                             .child(
                                 div()
                                     .flex_1()
                                     .flex()
                                     .flex_col()
-                                    .gap(px(2.0))
-                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).child("Alasan (jika tanggal lampau):"))
-                                    .child(div().h(px(24.0)).bg(rgb(0xFFFFFF)).border_1().border_color(rgb(Theme::BORDER_DARK)).px(px(6.0)).flex().items_center().text_size(px(11.5)).child(if reason_val.is_empty() { "Alasan tanggal lampau...".into() } else { reason_val })),
+                                    .gap(px(3.0))
+                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_MUTED)).child("ALASAN TANGGAL LAMPAU:"))
+                                    .child(div().h(px(28.0)).bg(rgb(0xFFFFFF)).border_1().border_color(rgb(Theme::BORDER_STRONG)).rounded(px(4.0)).px(px(8.0)).flex().items_center().text_size(px(12.0)).child(if reason_val.is_empty() { "Alasan tanggal lampau (jika masa lalu)...".into() } else { reason_val })),
                             ),
                     )
-                    // Tabel Baris Barang
+                    // Invoice Grid Baris Barang
                     .child(
                         div()
                             .border_1()
-                            .border_color(rgb(Theme::GRID_LINE))
-                            .bg(rgb(Theme::BG_SURFACE))
+                            .border_color(rgb(Theme::BORDER_DEFAULT))
+                            .rounded(px(5.0))
+                            .bg(rgb(Theme::BG_CARD))
                             .flex()
                             .flex_col()
+                            .overflow_hidden()
                             .child(
                                 div()
-                                    .h(px(24.0))
+                                    .h(px(28.0))
                                     .bg(rgb(Theme::BG_HEADER))
                                     .border_b_1()
-                                    .border_color(rgb(Theme::GRID_LINE))
+                                    .border_color(rgb(Theme::BORDER_DEFAULT))
                                     .flex()
                                     .items_center()
                                     .text_size(px(11.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(div().w(px(240.0)).px(px(6.0)).child("Nama Barang / Uraian"))
-                                    .child(div().w(px(70.0)).px(px(6.0)).text_right().child("Qty"))
-                                    .child(div().w(px(110.0)).px(px(6.0)).text_right().child("Harga (Rp)"))
-                                    .child(div().w(px(110.0)).px(px(6.0)).text_right().child("Subtotal (Rp)"))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(Theme::TEXT_MUTED))
+                                    .child(div().w(px(250.0)).px(px(8.0)).child("URAIAN / NAMA BARANG"))
+                                    .child(div().w(px(70.0)).px(px(8.0)).text_right().child("QTY"))
+                                    .child(div().w(px(110.0)).px(px(8.0)).text_right().child("HARGA (RP)"))
+                                    .child(div().w(px(120.0)).px(px(8.0)).text_right().child("SUBTOTAL (RP)"))
                                     .child(div().w(px(50.0)).child("")),
                             )
                             .children(self.sale_items.iter().enumerate().map(|(idx, (desc, qty, pr))| {
@@ -2706,23 +2611,23 @@ impl Desktop {
                                 let sub = toko_money::line_total(q, p).unwrap_or(0);
                                 let is_active_row = self.sale_active_field.0 == idx;
 
-                                let desc_display = if desc.is_empty() { "Ketik nama...".to_string() } else { desc.clone() };
+                                let desc_display = if desc.is_empty() { "Ketik nama barang...".to_string() } else { desc.clone() };
                                 let qty_display = if qty.is_empty() { "1".to_string() } else { qty.clone() };
                                 let price_display = if pr.is_empty() { "0".to_string() } else { format_idr(p) };
 
                                 div()
                                     .id(("sale-edit-row", idx))
-                                    .h(px(26.0))
+                                    .h(px(30.0))
                                     .border_b_1()
                                     .border_color(rgb(Theme::GRID_LINE))
-                                    .bg(rgb(if is_active_row { 0xEFF6FF } else { 0xFFFFFF }))
+                                    .bg(rgb(if is_active_row { Theme::PRIMARY_LIGHT } else { 0xFFFFFF }))
                                     .flex()
                                     .items_center()
-                                    .text_size(px(11.5))
-                                    .child(div().w(px(240.0)).px(px(6.0)).child(desc_display))
-                                    .child(div().w(px(70.0)).px(px(6.0)).text_right().child(qty_display))
-                                    .child(div().w(px(110.0)).px(px(6.0)).text_right().child(price_display))
-                                    .child(div().w(px(110.0)).px(px(6.0)).text_right().font_weight(FontWeight::SEMIBOLD).child(format_idr(sub)))
+                                    .text_size(px(12.0))
+                                    .child(div().w(px(250.0)).px(px(8.0)).font_weight(FontWeight::MEDIUM).child(desc_display))
+                                    .child(div().w(px(70.0)).px(px(8.0)).text_right().child(qty_display))
+                                    .child(div().w(px(110.0)).px(px(8.0)).text_right().child(price_display))
+                                    .child(div().w(px(120.0)).px(px(8.0)).text_right().font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(format_idr(sub)))
                                     .child(
                                         div()
                                             .w(px(50.0))
@@ -2734,8 +2639,9 @@ impl Desktop {
                                                     div()
                                                         .id(("del-sale-line", idx))
                                                         .cursor_pointer()
-                                                        .text_size(px(10.0))
-                                                        .text_color(rgb(Theme::COLOR_DEBIT))
+                                                        .text_size(px(10.5))
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
                                                         .on_click(cx.listener(move |this, _, _, cx| {
                                                             this.sale_items.remove(idx);
                                                             cx.notify();
@@ -2746,6 +2652,7 @@ impl Desktop {
                                     )
                             })),
                     )
+                    // Footer Kalkulasi Subtotal & Tambah Baris
                     .child(
                         div()
                             .flex()
@@ -2754,12 +2661,12 @@ impl Desktop {
                             .child(
                                 div()
                                     .id("btn-add-sale-row")
-                                    .h(px(22.0))
-                                    .px(px(8.0))
-                                    .bg(rgb(Theme::BG_WINDOW))
+                                    .h(px(26.0))
+                                    .px(px(10.0))
+                                    .bg(rgb(Theme::BG_APP))
                                     .border_1()
-                                    .border_color(rgb(Theme::BORDER_DARK))
-                                    .rounded(px(2.0))
+                                    .border_color(rgb(Theme::BORDER_STRONG))
+                                    .rounded(px(4.0))
                                     .flex()
                                     .items_center()
                                     .cursor_pointer()
@@ -2769,23 +2676,32 @@ impl Desktop {
                                         this.sale_active_field = (this.sale_items.len() - 1, 0);
                                         cx.notify();
                                     }))
-                                    .child(div().text_size(px(10.5)).font_weight(FontWeight::MEDIUM).child("+ Tambah Baris Barang")),
+                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::PRIMARY)).child("+ Tambah Baris Item")),
                             )
-                            .child(div().text_size(px(12.0)).font_weight(FontWeight::BOLD).child(format!("Total Penjualan: Rp {}", format_idr(total_sales)))),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(div().text_size(px(11.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_MUTED)).child("TOTAL PENJUALAN:"))
+                                    .child(div().text_size(px(14.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(format!("Rp {}", format_idr(total_sales)))),
+                            ),
                     )
+                    // Banner Deteksi Auto-Apply Saldo Deposit
                     .when(deposit_avail > 0 && total_sales > 0, |d| {
                         let auto_app = total_sales.min(deposit_avail);
                         d.child(
                             div()
-                                .p(px(6.0))
-                                .bg(rgb(0xEFF6FF))
+                                .p(px(8.0))
+                                .bg(rgb(Theme::BADGE_DEPOSIT_BG))
                                 .border_1()
-                                .border_color(rgb(0xBFDBFE))
-                                .rounded(px(2.0))
-                                .text_size(px(11.0))
-                                .text_color(rgb(Theme::COLOR_DEPOSIT))
+                                .border_color(rgb(Theme::BADGE_DEPOSIT_BORDER))
+                                .rounded(px(5.0))
+                                .text_size(px(11.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(Theme::PRIMARY))
                                 .child(format!(
-                                    "Saldo deposit sebesar Rp {} akan otomatis diterapkan melunasi nota ini saat disimpan!",
+                                    "✓ Deteksi Saldo: Deposit pelanggan sebesar Rp {} akan otomatis dialokasikan melunasi nota ini seketika saat disimpan.",
                                     format_idr(auto_app)
                                 )),
                         )
@@ -2793,37 +2709,38 @@ impl Desktop {
                     .when(!self.form_error.is_empty(), |d| {
                         d.child(
                             div()
-                                .p(px(6.0))
-                                .bg(rgb(0xFEE2E2))
+                                .p(px(8.0))
+                                .bg(rgb(Theme::BADGE_DEBIT_BG))
                                 .border_1()
-                                .border_color(rgb(0xFCA5A5))
-                                .rounded(px(2.0))
+                                .border_color(rgb(Theme::BADGE_DEBIT_BORDER))
+                                .rounded(px(5.0))
                                 .text_size(px(11.5))
-                                .text_color(rgb(Theme::COLOR_DEBIT))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
                                 .child(self.form_error.clone()),
                         )
                     })
                     .into_any_element();
 
                 let footer = div()
-                    .h(px(40.0))
+                    .h(px(46.0))
                     .bg(rgb(Theme::BG_HEADER))
                     .border_t_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(10.0))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .px(px(14.0))
                     .flex()
                     .items_center()
                     .justify_end()
-                    .gap(px(8.0))
+                    .gap(px(10.0))
                     .child(
                         div()
                             .id("btn-sale-modal-cancel")
-                            .h(px(26.0))
-                            .px(px(12.0))
-                            .bg(rgb(Theme::BG_SURFACE))
+                            .h(px(28.0))
+                            .px(px(14.0))
+                            .bg(rgb(Theme::BG_CARD))
                             .border_1()
-                            .border_color(rgb(Theme::BORDER_DARK))
-                            .rounded(px(2.0))
+                            .border_color(rgb(Theme::BORDER_DEFAULT))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
@@ -2832,28 +2749,34 @@ impl Desktop {
                                 this.active_modal = None;
                                 cx.notify();
                             }))
-                            .child(div().text_size(px(11.5)).child("Batal (Esc)")),
+                            .child(
+                                div()
+                                    .text_size(px(11.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(Theme::TEXT_SECONDARY))
+                                    .child("Batal (Esc)"),
+                            ),
                     )
                     .child(
                         div()
                             .id("btn-sale-modal-save")
-                            .h(px(26.0))
-                            .px(px(14.0))
-                            .bg(rgb(Theme::BTN_PRIMARY_BG))
-                            .rounded(px(2.0))
+                            .h(px(28.0))
+                            .px(px(16.0))
+                            .bg(rgb(Theme::PRIMARY))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
-                            .hover(|d| d.bg(rgb(0x106EBE)))
+                            .hover(|d| d.bg(rgb(Theme::PRIMARY_HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_modal(cx);
                             }))
                             .child(
                                 div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(0xFFFFFF))
-                                    .child("Simpan Penjualan (Enter)"),
+                                    .child("Simpan Penjualan Kredit (Enter)"),
                             ),
                     );
 
@@ -2862,96 +2785,128 @@ impl Desktop {
             _ => {
                 // Modal form umum (Login, Pelanggan Baru, Pembayaran, Terapkan Saldo, Tambah Pengguna, dll.)
                 let title = match modal {
-                    ActiveModal::Login => "Masuk / Ganti Pengguna",
-                    ActiveModal::ChangePassword => "Ganti Kata Sandi Akun",
-                    ActiveModal::NewCustomer => "Tambah Pelanggan Baru",
-                    ActiveModal::EditCustomer(_) => "Ubah Data Pelanggan",
-                    ActiveModal::RecordPayment => "Catat Pembayaran Piutang (FIFO)",
+                    ActiveModal::Login => "Masuk / Ganti Operator Sistem",
+                    ActiveModal::ChangePassword => "Perbarui Kata Sandi Akun",
+                    ActiveModal::NewCustomer => "Pendaftaran Pelanggan Baru",
+                    ActiveModal::EditCustomer(_) => "Perbarui Data Pelanggan",
+                    ActiveModal::RecordPayment => "Catat Pembayaran Piutang (Alokasi FIFO)",
                     ActiveModal::ApplyDeposit => "Terapkan Saldo Kredit Pelanggan (Deposit)",
                     ActiveModal::ReverseTransaction { .. } => {
-                        "Koreksi / Batalkan Mutasi Buku Piutang"
+                        "Koreksi / Pembatalan Mutasi Buku Piutang"
                     }
-                    ActiveModal::NewUser => "Tambah Pengguna Baru (Owner Only)",
-                    ActiveModal::ChangeAsOfDate => "Ubah Tanggal Acuan Laporan Aging",
-                    _ => "Dialog Formulir",
+                    ActiveModal::NewUser => "Registrasi Pengguna Baru (Owner Only)",
+                    ActiveModal::ChangeAsOfDate => "Konfigurasi Tanggal Acuan Laporan Aging",
+                    _ => "Formulir Transaksi",
                 };
 
                 let submit_label = match modal {
-                    ActiveModal::Login => "Masuk (Enter)",
-                    ActiveModal::RecordPayment => "Catat Pembayaran (Enter)",
+                    ActiveModal::Login => "Masuk Sistem (Enter)",
+                    ActiveModal::RecordPayment => "Simpan Pembayaran (Enter)",
                     ActiveModal::ApplyDeposit => "Terapkan Saldo (Enter)",
-                    ActiveModal::ReverseTransaction { .. } => "Batalkan Mutasi (Enter)",
-                    _ => "Simpan (Enter)",
+                    ActiveModal::ReverseTransaction { .. } => "Konfirmasi Batal (Enter)",
+                    _ => "Simpan Data (Enter)",
                 };
 
                 let dialog = ModalDialog::new(title, 480.0);
                 let body = div()
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
-                    .children(self.form_fields.iter().enumerate().map(|(idx, (label, val))| {
-                        let is_active = idx == self.form_active;
-                        let is_pw = label.to_lowercase().contains("sandi") || label.to_lowercase().contains("password");
+                    .gap(px(12.0))
+                    .children(
+                        self.form_fields
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, (label, val))| {
+                                let is_active = idx == self.form_active;
+                                let is_pw = label.to_lowercase().contains("sandi")
+                                    || label.to_lowercase().contains("password");
 
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(3.0))
-                            .child(div().text_size(px(11.5)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(*label))
-                            .child(
                                 div()
-                                    .h(px(26.0))
-                                    .bg(rgb(0xFFFFFF))
-                                    .border_1()
-                                    .border_color(rgb(if is_active { Theme::BG_ROW_SELECTED } else { Theme::BORDER_DARK }))
-                                    .px(px(6.0))
                                     .flex()
-                                    .items_center()
-                                    .text_size(px(12.0))
-                                    .child(if val.is_empty() {
-                                        div().text_color(rgb(Theme::TEXT_MUTED)).child("Ketik teks...")
-                                    } else if is_pw {
-                                        div().text_color(rgb(Theme::TEXT_PRIMARY)).child("•".repeat(val.len()))
-                                    } else {
-                                        div().text_color(rgb(Theme::TEXT_PRIMARY)).child(val.clone())
-                                    }),
-                            )
-                    }))
+                                    .flex_col()
+                                    .gap(px(4.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(Theme::TEXT_MUTED))
+                                            .child(*label),
+                                    )
+                                    .child(
+                                        div()
+                                            .h(px(30.0))
+                                            .bg(rgb(0xFFFFFF))
+                                            .border_1()
+                                            .border_color(rgb(if is_active {
+                                                Theme::PRIMARY
+                                            } else {
+                                                Theme::BORDER_STRONG
+                                            }))
+                                            .rounded(px(4.0))
+                                            .px(px(8.0))
+                                            .flex()
+                                            .items_center()
+                                            .text_size(px(12.0))
+                                            .child(if val.is_empty() {
+                                                div()
+                                                    .text_color(rgb(Theme::TEXT_LIGHT))
+                                                    .child("Ketik teks...")
+                                            } else if is_pw {
+                                                div()
+                                                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                                                    .child("•".repeat(val.len()))
+                                            } else {
+                                                div()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                                                    .child(val.clone())
+                                            }),
+                                    )
+                            }),
+                    )
                     .when(!self.form_error.is_empty(), |d| {
                         d.child(
                             div()
-                                .p(px(6.0))
-                                .bg(rgb(0xFEE2E2))
+                                .p(px(8.0))
+                                .bg(rgb(Theme::BADGE_DEBIT_BG))
                                 .border_1()
-                                .border_color(rgb(0xFCA5A5))
-                                .rounded(px(2.0))
+                                .border_color(rgb(Theme::BADGE_DEBIT_BORDER))
+                                .rounded(px(5.0))
                                 .text_size(px(11.5))
-                                .text_color(rgb(Theme::COLOR_DEBIT))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
                                 .child(self.form_error.clone()),
                         )
                     })
-                    .child(div().text_size(px(10.5)).text_color(rgb(Theme::TEXT_MUTED)).child("Gunakan [Tab] untuk berpindah kolom, [Enter] untuk simpan, [Esc] untuk batal."))
+                    .child(
+                        div()
+                            .text_size(px(10.5))
+                            .text_color(rgb(Theme::TEXT_LIGHT))
+                            .child(
+                                "Pintasan: [Tab] Pindah Kolom  •  [Enter] Simpan  •  [Esc] Batal",
+                            ),
+                    )
                     .into_any_element();
 
                 let footer = div()
-                    .h(px(40.0))
+                    .h(px(46.0))
                     .bg(rgb(Theme::BG_HEADER))
                     .border_t_1()
-                    .border_color(rgb(Theme::GRID_LINE))
-                    .px(px(10.0))
+                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                    .px(px(14.0))
                     .flex()
                     .items_center()
                     .justify_end()
-                    .gap(px(8.0))
+                    .gap(px(10.0))
                     .child(
                         div()
                             .id("btn-form-cancel")
-                            .h(px(26.0))
-                            .px(px(12.0))
-                            .bg(rgb(Theme::BG_SURFACE))
+                            .h(px(28.0))
+                            .px(px(14.0))
+                            .bg(rgb(Theme::BG_CARD))
                             .border_1()
-                            .border_color(rgb(Theme::BORDER_DARK))
-                            .rounded(px(2.0))
+                            .border_color(rgb(Theme::BORDER_DEFAULT))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
@@ -2960,26 +2915,32 @@ impl Desktop {
                                 this.active_modal = None;
                                 cx.notify();
                             }))
-                            .child(div().text_size(px(11.5)).child("Batal (Esc)")),
+                            .child(
+                                div()
+                                    .text_size(px(11.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(Theme::TEXT_SECONDARY))
+                                    .child("Batal (Esc)"),
+                            ),
                     )
                     .child(
                         div()
                             .id("btn-form-submit")
-                            .h(px(26.0))
-                            .px(px(14.0))
-                            .bg(rgb(Theme::BTN_PRIMARY_BG))
-                            .rounded(px(2.0))
+                            .h(px(28.0))
+                            .px(px(16.0))
+                            .bg(rgb(Theme::PRIMARY))
+                            .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .cursor_pointer()
-                            .hover(|d| d.bg(rgb(0x106EBE)))
+                            .hover(|d| d.bg(rgb(Theme::PRIMARY_HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.submit_modal(cx);
                             }))
                             .child(
                                 div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(0xFFFFFF))
                                     .child(submit_label),
                             ),
@@ -2993,7 +2954,7 @@ impl Desktop {
 
 fn main() {
     Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1120.0), px(740.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1180.0), px(760.0)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

@@ -1,6 +1,6 @@
-//! Native Modal Dialog Container
-//! Menampilkan dialog modal desktop standar dengan titlebar biru/slate,
-//! tombol [X], tombol [ Batal (Esc) ] dan [ Simpan/Aksi (Enter) ].
+//! Modern Enterprise Modal Dialog Container
+//! Menampilkan dialog modal modern dengan border halus, header bersih,
+//! tombol [X], tombol [ Batal (Esc) ] dan tombol aksi utama bernuansa enterprise.
 
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Div, FontWeight, div, prelude::*, px, rgb};
@@ -29,7 +29,7 @@ impl ModalDialog {
         div()
             .absolute()
             .inset_0()
-            .bg(Theme::hsla_alpha(0x000000, 0.45))
+            .bg(Theme::hsla_alpha(Theme::MODAL_BACKDROP, 0.55))
             .flex()
             .items_center()
             .justify_center()
@@ -37,31 +37,36 @@ impl ModalDialog {
                 div()
                     .w(px(self.width_px))
                     .when_some(self.height_px, |d, h| d.h(px(h)))
-                    .bg(rgb(Theme::BG_WINDOW))
-                    .border_2()
-                    .border_color(rgb(Theme::BORDER_DARK))
-                    .rounded(px(4.0))
-                    .shadow_lg()
+                    .bg(rgb(0xFFFFFF))
+                    .border_1()
+                    .border_color(rgb(Theme::MODAL_BORDER))
+                    .rounded(px(8.0))
+                    .shadow_2xl()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
+                    // Header Modal Modern
                     .child(
                         div()
-                            .h(px(32.0))
-                            .bg(rgb(Theme::TITLEBAR_BG))
-                            .px(px(10.0))
+                            .h(px(42.0))
+                            .bg(rgb(Theme::MODAL_HEADER_BG))
+                            .border_b_1()
+                            .border_color(rgb(Theme::BORDER_DEFAULT))
+                            .px(px(14.0))
                             .flex()
                             .items_center()
                             .justify_between()
                             .child(
                                 div()
-                                    .text_size(px(12.5))
+                                    .text_size(px(13.5))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(Theme::TITLEBAR_TEXT))
+                                    .text_color(rgb(Theme::TEXT_PRIMARY))
                                     .child(self.title),
                             ),
                     )
-                    .child(div().flex_1().p(px(14.0)).overflow_hidden().child(body))
+                    // Isi Form Modal
+                    .child(div().flex_1().p(px(16.0)).overflow_hidden().child(body))
+                    // Footer Modal
                     .child(footer),
             )
     }
