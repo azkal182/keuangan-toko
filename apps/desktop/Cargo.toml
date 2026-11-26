@@ -1,0 +1,11 @@
+[package]
+name = "toko-desktop"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
+chrono = "0.4"
+toko-money = { path = "../../crates/money" }
+uuid = "1"
