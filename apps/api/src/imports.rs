@@ -2117,9 +2117,7 @@ impl RetryKey {
     }
 }
 
-fn prepare_legacy_allocations(
-    committed: &[PreparedImportEntry],
-) -> Vec<PreparedLegacyAllocation> {
+fn prepare_legacy_allocations(committed: &[PreparedImportEntry]) -> Vec<PreparedLegacyAllocation> {
     let mut open_debits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
     let mut open_credits = BTreeMap::<Uuid, VecDeque<(Uuid, i64)>>::new();
     let mut legacy_allocations = Vec::<PreparedLegacyAllocation>::new();
