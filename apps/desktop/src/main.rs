@@ -1,12 +1,10 @@
-//! Keuangan Toko - Enterprise Desktop Application (GPUI)
-//! Antarmuka desktop kelas enterprise yang modern, profesional, dan responsif:
-//! - Top App Bar modern dengan branding, tab navigasi aktif, dan profil operator
-//! - Action Toolbar kontekstual dengan tombol aksi cepat dan kotak pencarian terintegrasi
-//! - Enterprise DBGrid: baris nyaman (32px), seleksi soft blue dengan left indicator bar,
-//!   badge status berbentuk pill modern dengan border halus, angka tabular rata kanan
-//! - Status bar 3-panel minimalis dengan indikator status sistem aktif
-//! - Windowed modal dialogs modern (Penjualan Multi-Item, Pembayaran FIFO, Deposit, Aging, User)
-//! - Beroperasi melalui TokoStoreAdapter dengan in-memory MockDataAdapter
+//! Keuangan Toko - Native Windows Desktop Application (GPUI)
+//! Arsitektur UI/UX Native Desktop yang presisi dan kontekstual:
+//! - System Menu Bar (26px) di puncak jendela + Left Explorer Navigation Pane (210px)
+//! - Contextual Page Command Bar (38px) yang HANYA menampilkan tombol aksi sesuai halaman/tab aktif
+//! - Native DBGrid dengan kolom indikator baris (`#` / `▶`), garis sel tegas, dan format akuntansi `(Rp ...)`
+//! - Seluruh data, aturan bisnis, dan otorisasi selaras 100% dengan spesifikasi final (ADR-007, API_SPEC, FEATURE_SPECIFICATIONS)
+#![allow(clippy::get_first, clippy::too_many_arguments, clippy::collapsible_if)]
 
 mod mock;
 pub mod store;
@@ -17,17 +15,22 @@ use gpui::{
     App, Application, Bounds, Context, Div, FocusHandle, FontWeight, KeyDownEvent, Window,
     WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
 };
-use store::mock_store::MockDataAdapter;
+use store::mock_store::{MockDataAdapter, compute_line_total_half_up};
 use store::*;
 use ui::db_grid::{
-    ColumnAlign, GridColumn, grid_badge, grid_cell, render_empty_state, render_grid_header,
+    ColumnAlign, GridColumn, grid_badge, grid_cell, grid_cell_styled, grid_row_indicator,
+    render_empty_state, render_grid_header,
 };
-use ui::menu_bar::{brand_logo_pill, nav_tab_button, render_top_app_bar_container};
+use ui::menu_bar::{
+    render_left_sidebar_container, render_system_menu_bar, sidebar_nav_item,
+    sidebar_section_header, system_menu_item,
+};
 use ui::modal::ModalDialog;
 use ui::status_bar::StatusBar;
-use ui::theme::{Theme, format_idr};
+use ui::theme::{Theme, format_accounting_rupiah, format_idr, format_rupiah};
 use ui::tool_bar::{
-    primary_action_button, render_toolbar_container, secondary_action_button, tool_separator,
+    accent_action_button, primary_action_button, render_toolbar_container, secondary_action_button,
+    tool_separator,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,15 +52,31 @@ pub enum ActiveModal {
     Login,
     ChangePassword,
     NewCustomer,
-    EditCustomer(String),
+    EditCustomer {
+        customer_id: String,
+    },
+    MergeCustomer {
+        source_id: String,
+    },
     RecordSale,
     RecordPayment,
     ApplyDeposit,
+    ReallocatePayment {
+        payment_id: String,
+    },
     ReverseTransaction {
         customer_id: String,
         entry_id: String,
     },
+    FilterLedgerDate,
     NewUser,
+    EditUser {
+        user_id: String,
+    },
+    ResetUserPassword {
+        user_id: String,
+        username: String,
+    },
     ChangeAsOfDate,
     Notice {
         title: &'static str,
@@ -66,39 +85,55 @@ pub enum ActiveModal {
 }
 
 pub struct Desktop {
-    pub store: MockDataAdapter,
-    pub session: Option<SessionUser>,
-    pub current_view: CurrentView,
-    pub selected_customer_id: Option<String>,
-    pub customer_tab: CustomerTab,
-    pub query: String,
-    pub status_msg: String,
-    pub active_modal: Option<ActiveModal>,
-    pub form_fields: Vec<(&'static str, String)>,
-    pub form_active: usize,
-    pub form_error: String,
-    pub sale_items: Vec<(String, String, String)>, // (deskripsi, qty, harga)
-    pub sale_active_field: (usize, usize),         // (baris, kolom: 0=desc, 1=qty, 2=price)
-    pub aging_as_of: NaiveDate,
-    pub aging_selected_bucket: Option<usize>,
-    pub focus: FocusHandle,
+    store: Box<dyn TokoStoreAdapter>,
+    session: Option<SessionUser>,
+    current_view: CurrentView,
+    selected_customer_id: Option<String>,
+    customer_tab: CustomerTab,
+    query: String,
+    customer_active_only: bool,
+    ledger_sort_desc: bool,
+    ledger_from: Option<NaiveDate>,
+    ledger_to: Option<NaiveDate>,
+    status_msg: String,
+    active_modal: Option<ActiveModal>,
+    form_fields: Vec<(&'static str, String)>,
+    form_active: usize,
+    form_error: String,
+    // State khusus form penjualan multi-item
+    sale_items: Vec<(String, String, String)>, // (uraian, qty, harga_satuan)
+    sale_active_field: (usize, usize), // (row_index, col_index: 0=desc, 1=qty, 2=price, 99=header_fields)
+    // State khusus aging report
+    aging_as_of: NaiveDate,
+    aging_selected_bucket: Option<usize>, // None=Semua, 0=0-15, 1=16-30, 2=31-45, 3=46-60, 4=>60, 5=unknown, 6=future
+    focus: FocusHandle,
 }
 
 impl Desktop {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let store = MockDataAdapter::new();
+        let store = Box::new(MockDataAdapter::new());
         let session = store.current_session();
         let today = Local::now().date_naive();
+        let first_cust_id = store
+            .list_customers(&CustomerQuery {
+                search: None,
+                active_only: false,
+            })
+            .first()
+            .map(|c| c.id.clone());
 
         Self {
             store,
             session,
             current_view: CurrentView::CustomerList,
-            selected_customer_id: None,
+            selected_customer_id: first_cust_id,
             customer_tab: CustomerTab::Ledger,
             query: String::new(),
-            status_msg: "Sistem operasional siap. Gunakan mouse atau pintasan keyboard (F2 - F8)."
-                .into(),
+            customer_active_only: false,
+            ledger_sort_desc: true, // Default sesuai Web: Terbaru di Atas
+            ledger_from: None,
+            ledger_to: None,
+            status_msg: "Sistem siap. Gunakan panel navigasi kiri, tombol toolbar kontekstual, atau pintasan keyboard.".into(),
             active_modal: None,
             form_fields: Vec::new(),
             form_active: 0,
@@ -111,60 +146,162 @@ impl Desktop {
         }
     }
 
-    pub fn today_jakarta(&self) -> NaiveDate {
+    fn today_jakarta(&self) -> NaiveDate {
         Local::now().date_naive()
     }
 
-    pub fn can_write(&self) -> bool {
+    fn is_owner(&self) -> bool {
         self.session
             .as_ref()
-            .map(|u| u.role == UserRole::Owner || u.role == UserRole::Operator)
+            .map(|s| s.role == UserRole::Owner)
             .unwrap_or(false)
     }
 
-    pub fn is_owner(&self) -> bool {
+    fn can_write(&self) -> bool {
         self.session
             .as_ref()
-            .map(|u| u.role == UserRole::Owner)
+            .map(|s| s.role == UserRole::Owner || s.role == UserRole::Operator)
             .unwrap_or(false)
     }
 
-    // Helper pembuka dialog modal
+    fn active_module_name(&self) -> &'static str {
+        match self.current_view {
+            CurrentView::CustomerList => "Ringkasan Pelanggan",
+            CurrentView::CustomerDetail => match self.customer_tab {
+                CustomerTab::Ledger => "Detail Pelanggan > Buku Piutang",
+                CustomerTab::Payments => "Detail Pelanggan > Riwayat Pembayaran",
+            },
+            CurrentView::AgingReport => "Laporan Umur Piutang",
+            CurrentView::UserManagement => "Manajemen Pengguna",
+        }
+    }
+
+    // =========================================================================
+    // Pembuka Modal Kontekstual
+    // =========================================================================
+
     pub fn open_new_customer_modal(&mut self) {
         if !self.can_write() {
             self.status_msg =
-                "Akses ditolak: Hanya Owner dan Operator yang dapat menambah pelanggan.".into();
+                "Akses ditolak: Hanya Pemilik (Owner) dan Operator yang dapat menambah pelanggan."
+                    .into();
             return;
         }
         self.form_fields = vec![
+            (
+                "Kode Pelanggan (Opsional, unik setelah trim/uppercase)",
+                String::new(),
+            ),
             ("Nama Pelanggan (Wajib)", String::new()),
-            ("Kode Pelanggan (Opsional)", String::new()),
-            ("Alamat Lengkap (Opsional)", String::new()),
-            ("Nomor Telepon / HP (Opsional)", String::new()),
+            ("Alamat Pelanggan (Opsional)", String::new()),
+        ];
+        self.form_active = 1;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::NewCustomer);
+    }
+
+    pub fn open_edit_customer_modal(&mut self) {
+        if !self.can_write() {
+            self.status_msg =
+                "Akses ditolak: Hanya Pemilik (Owner) dan Operator yang dapat mengubah pelanggan."
+                    .into();
+            return;
+        }
+        let Some(cid) = self.selected_customer_id.clone() else {
+            self.status_msg = "Pilih pelanggan terlebih dahulu.".into();
+            return;
+        };
+        let Ok(detail) = self.store.get_customer(&cid) else {
+            self.status_msg = "Pelanggan tidak ditemukan.".into();
+            return;
+        };
+        self.form_fields = vec![
+            (
+                "Kode Pelanggan (Kosongkan untuk menghapus kode)",
+                detail.code.unwrap_or_default(),
+            ),
+            ("Nama Pelanggan (Wajib)", detail.name),
+            (
+                "Alamat Pelanggan (Opsional)",
+                detail.address.unwrap_or_default(),
+            ),
+            (
+                "Status Aktif (ketik: aktif / nonaktif)",
+                if detail.is_active {
+                    "aktif".into()
+                } else {
+                    "nonaktif".into()
+                },
+            ),
+        ];
+        self.form_active = 1;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::EditCustomer { customer_id: cid });
+    }
+
+    pub fn open_merge_customer_modal(&mut self) {
+        if !self.is_owner() {
+            self.status_msg =
+                "Akses ditolak: Penggabungan (merge) pelanggan hanya dapat dilakukan oleh Pemilik (Owner)."
+                    .into();
+            return;
+        }
+        let Some(cid) = self.selected_customer_id.clone() else {
+            self.status_msg = "Pilih pelanggan sumber terlebih dahulu.".into();
+            return;
+        };
+        let targets = self.store.list_customers(&CustomerQuery {
+            search: None,
+            active_only: true,
+        });
+        let first_target = targets
+            .iter()
+            .find(|c| c.id != cid)
+            .and_then(|c| c.code.clone().or_else(|| Some(c.name.clone())))
+            .unwrap_or_default();
+
+        self.form_fields = vec![
+            (
+                "Kode atau Nama Pelanggan Tujuan (Target Aktif)",
+                first_target,
+            ),
+            (
+                "Alasan Penggabungan Pelanggan (Wajib untuk Audit)",
+                "Duplikasi data pelanggan".into(),
+            ),
         ];
         self.form_active = 0;
         self.form_error.clear();
-        self.active_modal = Some(ActiveModal::NewCustomer);
+        self.active_modal = Some(ActiveModal::MergeCustomer { source_id: cid });
     }
 
     pub fn open_record_sale_modal(&mut self) {
         if !self.can_write() {
             self.status_msg =
-                "Akses ditolak: Hanya Owner dan Operator yang dapat mencatat penjualan.".into();
+                "Akses ditolak: Hanya Pemilik (Owner) dan Operator yang dapat mencatat penjualan kredit."
+                    .into();
             return;
         }
-        if self.selected_customer_id.is_none() {
-            self.status_msg =
-                "Pilih pelanggan terlebih dahulu untuk mencatat penjualan kredit.".into();
+        let Some(cid) = &self.selected_customer_id else {
+            self.status_msg = "Pilih pelanggan terlebih dahulu.".into();
             return;
+        };
+        if let Ok(cust) = self.store.get_customer(cid) {
+            if !cust.is_active {
+                self.status_msg =
+                    "Pelanggan ini berstatus Nonaktif. Aktifkan terlebih dahulu untuk mencatat penjualan."
+                        .into();
+                return;
+            }
         }
         self.form_fields = vec![
             (
                 "Tanggal Transaksi (YYYY-MM-DD)",
                 self.today_jakarta().to_string(),
             ),
+            ("No. Referensi / Nota (Opsional)", String::new()),
             (
-                "Alasan Tanggal Lampau (Wajib jika masa lalu)",
+                "Alasan Tanggal Lampau / Backdate (Wajib & khusus Owner jika tanggal < hari ini)",
                 String::new(),
             ),
         ];
@@ -178,39 +315,39 @@ impl Desktop {
     pub fn open_record_payment_modal(&mut self) {
         if !self.can_write() {
             self.status_msg =
-                "Akses ditolak: Hanya Owner dan Operator yang dapat mencatat pembayaran.".into();
+                "Akses ditolak: Hanya Pemilik (Owner) dan Operator yang dapat mencatat pembayaran."
+                    .into();
             return;
         }
         if self.selected_customer_id.is_none() {
-            self.status_msg = "Pilih pelanggan terlebih dahulu untuk mencatat pembayaran.".into();
+            self.status_msg = "Pilih pelanggan terlebih dahulu.".into();
             return;
         }
         self.form_fields = vec![
             (
-                "Tanggal Pembayaran (YYYY-MM-DD)",
-                self.today_jakarta().to_string(),
-            ),
-            ("Jumlah Pembayaran Rupiah (Contoh: 150000)", String::new()),
-            (
-                "Metode Pembayaran (Tunai / Transfer Bank / QRIS)",
-                "Tunai".into(),
-            ),
-            ("Nomor Referensi Transfer / Bukti (Opsional)", String::new()),
-            ("Catatan Tambahan (Opsional)", String::new()),
-            (
-                "Alasan Tanggal Lampau (Wajib jika masa lalu)",
+                "Nominal Pembayaran Diterima (Rp - Bilangan Bulat > 0)",
                 String::new(),
             ),
+            (
+                "Tanggal Diterima (YYYY-MM-DD)",
+                self.today_jakarta().to_string(),
+            ),
+            (
+                "Metode Pembayaran (ketik: Tunai / Transfer Bank)",
+                "Tunai".into(),
+            ),
+            ("Referensi Bukti / No. Transfer (Opsional)", String::new()),
+            ("Catatan Tambahan (Opsional)", String::new()),
         ];
-        self.form_active = 1;
+        self.form_active = 0;
         self.form_error.clear();
         self.active_modal = Some(ActiveModal::RecordPayment);
     }
 
-    pub fn open_apply_deposit_modal(&mut self) {
+    pub fn open_apply_deposit_modal_for_payment(&mut self, preferred_payment_id: Option<String>) {
         if !self.can_write() {
             self.status_msg =
-                "Akses ditolak: Hanya Owner dan Operator yang dapat menerapkan saldo kredit."
+                "Akses ditolak: Hanya Pemilik (Owner) dan Operator yang dapat menerapkan saldo kredit."
                     .into();
             return;
         }
@@ -220,6 +357,14 @@ impl Desktop {
         };
 
         let payments = self.store.list_payments(cid).unwrap_or_default();
+        let credit_payment = if let Some(pref_id) = preferred_payment_id {
+            payments
+                .iter()
+                .find(|p| p.id == pref_id && p.unallocated_credit_idr > 0)
+        } else {
+            payments.iter().find(|p| p.unallocated_credit_idr > 0)
+        };
+
         let ledger = self
             .store
             .get_ledger(
@@ -230,46 +375,29 @@ impl Desktop {
                     order_desc: false,
                 },
             )
+            .map(|page| page.entries)
             .unwrap_or_default();
-
-        let unallocated_payments: Vec<_> = payments
+        let open_debit = ledger
             .iter()
-            .filter(|p| p.unallocated_credit_idr > 0)
-            .collect();
-        let open_debits: Vec<_> = ledger
-            .iter()
-            .filter(|e| e.debit_idr > 0 && e.remaining_idr > 0 && !e.is_reversed)
-            .collect();
+            .find(|e| e.remaining_idr > 0 && !e.is_reversed);
 
-        if unallocated_payments.is_empty() {
-            self.active_modal = Some(ActiveModal::Notice {
-                title: "Saldo Deposit Kosong",
-                message: "Pelanggan ini tidak memiliki saldo pembayaran lebih (deposit) yang dapat diterapkan.".into(),
-            });
-            return;
-        }
-
-        if open_debits.is_empty() {
-            self.active_modal = Some(ActiveModal::Notice {
-                title: "Tidak Ada Nota Terbuka",
-                message: "Semua tagihan debet pelanggan sudah lunas. Saldo kredit tetap tersimpan sebagai deposit aman.".into(),
-            });
-            return;
-        }
-
-        let first_pay = unallocated_payments[0];
-        let first_deb = open_debits[0];
-        let max_app = first_pay
-            .unallocated_credit_idr
-            .min(first_deb.remaining_idr);
+        let pay_id_default = credit_payment.map(|p| p.id.clone()).unwrap_or_default();
+        let debit_id_default = open_debit.map(|e| e.id.clone()).unwrap_or_default();
+        let suggested_amount = match (credit_payment, open_debit) {
+            (Some(p), Some(d)) => p.unallocated_credit_idr.min(d.remaining_idr).to_string(),
+            _ => String::new(),
+        };
 
         self.form_fields = vec![
-            ("ID Pembayaran Sumber", first_pay.id.clone()),
-            ("ID Nota Debet Tujuan", first_deb.id.clone()),
-            ("Jumlah Penerapan (Rp)", max_app.to_string()),
+            ("ID Pembayaran Sumber Saldo Kredit", pay_id_default),
             (
-                "Alasan Penerapan (Wajib diisi)",
-                "Penerapan saldo deposit pelanggan ke nota terbuka".into(),
+                "ID Transaksi Debet (Piutang Terbuka) Tujuan",
+                debit_id_default,
+            ),
+            ("Nominal Kredit Diterapkan (Rp)", suggested_amount),
+            (
+                "Alasan Penerapan Saldo Kredit (Wajib untuk Audit)",
+                "Penerapan saldo lebih pembayaran ke nota terbuka".into(),
             ),
         ];
         self.form_active = 2;
@@ -277,68 +405,189 @@ impl Desktop {
         self.active_modal = Some(ActiveModal::ApplyDeposit);
     }
 
-    pub fn open_reverse_modal(&mut self, entry_id: &str) {
-        if !self.can_write() {
+    pub fn open_reallocate_payment_modal(&mut self, payment_id: &str) {
+        if !self.is_owner() {
             self.status_msg =
-                "Akses ditolak: Hanya Owner dan Operator yang dapat membatalkan mutasi.".into();
+                "Akses ditolak: Realokasi pembayaran hanya dapat dilakukan oleh Pemilik (Owner)."
+                    .into();
             return;
         }
         let Some(cid) = &self.selected_customer_id else {
             return;
         };
-        self.form_fields = vec![(
-            "Alasan Koreksi / Pembatalan (Wajib)",
-            "Salah input transaksi barang".into(),
-        )];
-        self.form_active = 0;
-        self.form_error.clear();
-        self.active_modal = Some(ActiveModal::ReverseTransaction {
-            customer_id: cid.clone(),
-            entry_id: entry_id.to_string(),
-        });
-    }
+        let payments = self.store.list_payments(cid).unwrap_or_default();
+        let Some(payment) = payments.iter().find(|p| p.id == payment_id) else {
+            return;
+        };
+        let ledger = self
+            .store
+            .get_ledger(
+                cid,
+                &LedgerQuery {
+                    from: None,
+                    to: None,
+                    order_desc: false,
+                },
+            )
+            .map(|page| page.entries)
+            .unwrap_or_default();
+        let first_debit = ledger
+            .iter()
+            .find(|e| e.debit_idr > 0 && !e.is_reversed)
+            .map(|e| e.id.clone())
+            .unwrap_or_default();
 
-    pub fn open_change_password_modal(&mut self) {
         self.form_fields = vec![
-            ("Kata Sandi Saat Ini", String::new()),
-            ("Kata Sandi Baru (Min. 8 karakter)", String::new()),
-            ("Konfirmasi Kata Sandi Baru", String::new()),
-        ];
-        self.form_active = 0;
-        self.form_error.clear();
-        self.active_modal = Some(ActiveModal::ChangePassword);
-    }
-
-    pub fn open_login_modal(&mut self) {
-        self.form_fields = vec![
-            ("Username Akun", "azka".into()),
-            ("Kata Sandi", "owner123".into()),
+            (
+                "ID Transaksi Debet Tujuan Baru (Kosongkan untuk melepas semua ke Saldo Kredit)",
+                first_debit,
+            ),
+            (
+                "Nominal Alokasi Baru (Rp, 0 s/d Nominal Pembayaran)",
+                payment.amount_idr.to_string(),
+            ),
+            (
+                "Alasan Realokasi Pembayaran (Wajib untuk Audit)",
+                "Koreksi alokasi nota oleh Owner".into(),
+            ),
         ];
         self.form_active = 1;
         self.form_error.clear();
-        self.active_modal = Some(ActiveModal::Login);
+        self.active_modal = Some(ActiveModal::ReallocatePayment {
+            payment_id: payment_id.to_string(),
+        });
+    }
+
+    pub fn open_reverse_modal(&mut self, entry_id: &str) {
+        if !self.is_owner() {
+            self.status_msg =
+                "Akses ditolak: Pembalikan (reversal) transaksi hanya diizinkan untuk Pemilik (Owner)."
+                    .into();
+            return;
+        }
+        if let Some(cid) = &self.selected_customer_id {
+            self.form_fields = vec![(
+                "Alasan Pembalikan / Reversal Transaksi (Wajib untuk Audit)",
+                String::new(),
+            )];
+            self.form_active = 0;
+            self.form_error.clear();
+            self.active_modal = Some(ActiveModal::ReverseTransaction {
+                customer_id: cid.clone(),
+                entry_id: entry_id.to_string(),
+            });
+        }
+    }
+
+    pub fn open_filter_ledger_date_modal(&mut self) {
+        self.form_fields = vec![
+            (
+                "Dari Tanggal (YYYY-MM-DD, kosongkan untuk dari awal)",
+                self.ledger_from.map(|d| d.to_string()).unwrap_or_default(),
+            ),
+            (
+                "Sampai Tanggal (YYYY-MM-DD, kosongkan untuk sampai akhir)",
+                self.ledger_to.map(|d| d.to_string()).unwrap_or_default(),
+            ),
+        ];
+        self.form_active = 0;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::FilterLedgerDate);
     }
 
     pub fn open_new_user_modal(&mut self) {
         if !self.is_owner() {
             self.status_msg =
-                "Akses ditolak: Hanya Owner yang dapat menambah akun pengguna.".into();
+                "Akses ditolak: Hanya Pemilik (Owner) yang dapat mengelola akun pengguna.".into();
             return;
         }
         self.form_fields = vec![
-            ("Username (Huruf kecil, tanpa spasi)", String::new()),
-            ("Nama Lengkap", String::new()),
-            ("Peran Akun (Owner / Operator / Viewer)", "Operator".into()),
-            ("Kata Sandi Awal", "password123".into()),
+            ("Nama Pengguna / Username (Wajib)", String::new()),
+            (
+                "Peran Hak Akses (owner / operator / viewer)",
+                "operator".into(),
+            ),
+            (
+                "Kata Sandi Sementara (Wajib Minimal 15 Karakter)",
+                "sandisementara123".into(),
+            ),
         ];
         self.form_active = 0;
         self.form_error.clear();
         self.active_modal = Some(ActiveModal::NewUser);
     }
 
+    pub fn open_edit_user_modal(&mut self, user: &UserItem) {
+        if !self.is_owner() {
+            return;
+        }
+        self.form_fields = vec![
+            ("Nama Pengguna / Username", user.username.clone()),
+            (
+                "Peran Hak Akses (owner / operator / viewer)",
+                user.role.as_str().to_string(),
+            ),
+            (
+                "Status Keaktifan (aktif / nonaktif)",
+                if user.is_active {
+                    "aktif".into()
+                } else {
+                    "nonaktif".into()
+                },
+            ),
+        ];
+        self.form_active = 0;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::EditUser {
+            user_id: user.id.clone(),
+        });
+    }
+
+    pub fn open_reset_user_password_modal(&mut self, user: &UserItem) {
+        if !self.is_owner() {
+            return;
+        }
+        self.form_fields = vec![(
+            "Kata Sandi Sementara Baru (Wajib Minimal 15 Karakter)",
+            "resetpassword12345".into(),
+        )];
+        self.form_active = 0;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::ResetUserPassword {
+            user_id: user.id.clone(),
+            username: user.username.clone(),
+        });
+    }
+
+    pub fn open_login_modal(&mut self) {
+        self.form_fields = vec![
+            (
+                "Username (owner / operator_kasir / auditor_viewer)",
+                "owner".into(),
+            ),
+            (
+                "Kata Sandi (default: password1234567)",
+                "password1234567".into(),
+            ),
+        ];
+        self.form_active = 0;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::Login);
+    }
+
+    pub fn open_change_password_modal(&mut self) {
+        self.form_fields = vec![
+            ("Kata Sandi Saat Ini", String::new()),
+            ("Kata Sandi Baru (Wajib Minimal 15 Karakter)", String::new()),
+        ];
+        self.form_active = 0;
+        self.form_error.clear();
+        self.active_modal = Some(ActiveModal::ChangePassword);
+    }
+
     pub fn open_change_as_of_modal(&mut self) {
         self.form_fields = vec![(
-            "Tanggal Acuan Laporan Aging (YYYY-MM-DD)",
+            "Tanggal Acuan Laporan Umur Piutang (YYYY-MM-DD, maks hari ini)",
             self.aging_as_of.to_string(),
         )];
         self.form_active = 0;
@@ -346,412 +595,660 @@ impl Desktop {
         self.active_modal = Some(ActiveModal::ChangeAsOfDate);
     }
 
-    // Submit form modal aktif
-    pub fn submit_modal(&mut self, cx: &mut Context<Self>) {
+    fn submit_modal(&mut self, cx: &mut Context<Self>) {
         let Some(modal) = self.active_modal.clone() else {
             return;
         };
-        let fields: Vec<String> = self
-            .form_fields
-            .iter()
-            .map(|(_, val)| val.trim().to_string())
-            .collect();
 
         match modal {
-            ActiveModal::Notice { .. } => {
-                self.active_modal = None;
-            }
             ActiveModal::Login => {
-                let username = fields.first().cloned().unwrap_or_default();
-                let password = fields.get(1).cloned().unwrap_or_default();
-                match self.store.login(&username, &password) {
-                    Ok(user) => {
-                        let must_change = user.must_change_password;
-                        self.session = Some(user);
+                let u = self.form_fields.get(0).map(|f| f.1.as_str()).unwrap_or("");
+                let p = self.form_fields.get(1).map(|f| f.1.as_str()).unwrap_or("");
+                match self.store.login(u, p) {
+                    Ok(sess) => {
+                        let must_change = sess.must_change_password;
+                        self.status_msg = format!(
+                            "Berhasil masuk sebagai {} ({}).",
+                            sess.username,
+                            sess.role.label()
+                        );
+                        if sess.role != UserRole::Owner
+                            && self.current_view == CurrentView::UserManagement
+                        {
+                            self.current_view = CurrentView::CustomerList;
+                        }
+                        self.session = Some(sess);
                         self.active_modal = None;
-                        self.status_msg = format!("Berhasil masuk sebagai {}.", username);
                         if must_change {
                             self.open_change_password_modal();
+                            self.form_error = "Akun menggunakan kata sandi sementara. Anda wajib menggantinya sebelum melanjutkan (AC-019).".into();
                         }
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
-                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::ChangePassword => {
-                let current = fields.first().cloned().unwrap_or_default();
-                let new_pw = fields.get(1).cloned().unwrap_or_default();
-                let conf_pw = fields.get(2).cloned().unwrap_or_default();
-
-                if new_pw.len() < 8 {
-                    self.form_error = "Kata sandi baru minimal 8 karakter.".into();
-                    return;
-                }
-                if new_pw != conf_pw {
-                    self.form_error = "Konfirmasi kata sandi tidak cocok.".into();
-                    return;
-                }
-                match self.store.change_password(&current, &new_pw) {
-                    Ok(_) => {
-                        if let Some(s) = &mut self.session {
-                            s.must_change_password = false;
-                        }
-                        self.active_modal = Some(ActiveModal::Notice {
-                            title: "Kata Sandi Berhasil Diperbarui",
-                            message: "Kata sandi akun Anda telah sukses diubah.".into(),
-                        });
-                        self.status_msg = "Kata sandi telah diperbarui.".into();
+                let old_pw = self.form_fields.get(0).map(|f| f.1.as_str()).unwrap_or("");
+                let new_pw = self.form_fields.get(1).map(|f| f.1.as_str()).unwrap_or("");
+                match self.store.change_password(old_pw, new_pw) {
+                    Ok(()) => {
+                        self.session = self.store.current_session();
+                        self.status_msg =
+                            "Kata sandi berhasil diperbarui dan sesi lain telah dicabut.".into();
+                        self.active_modal = None;
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
-                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::NewCustomer => {
-                let name = fields.first().cloned().unwrap_or_default();
-                let code = fields.get(1).filter(|s| !s.is_empty()).cloned();
-                let address = fields.get(2).filter(|s| !s.is_empty()).cloned();
-                let phone = fields.get(3).filter(|s| !s.is_empty()).cloned();
+                let code_raw = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                let name = self
+                    .form_fields
+                    .get(1)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let addr_raw = self.form_fields.get(2).map(|f| f.1.trim()).unwrap_or("");
 
                 let input = CreateCustomerInput {
+                    code: if code_raw.is_empty() {
+                        None
+                    } else {
+                        Some(code_raw.to_string())
+                    },
                     name,
-                    code,
-                    address,
-                    phone,
+                    address: if addr_raw.is_empty() {
+                        None
+                    } else {
+                        Some(addr_raw.to_string())
+                    },
                 };
+
                 match self.store.create_customer(&input) {
                     Ok(detail) => {
-                        self.selected_customer_id = Some(detail.id.clone());
+                        self.status_msg =
+                            format!("Pelanggan '{}' berhasil ditambahkan.", detail.name);
+                        self.selected_customer_id = Some(detail.id);
                         self.current_view = CurrentView::CustomerDetail;
                         self.active_modal = None;
-                        self.status_msg =
-                            format!("Pelanggan {} berhasil didaftarkan.", detail.name);
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
-                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
-            ActiveModal::EditCustomer(id) => {
-                let name = fields.first().cloned().unwrap_or_default();
-                let code = fields.get(1).filter(|s| !s.is_empty()).cloned();
-                let address = fields.get(2).filter(|s| !s.is_empty()).cloned();
-                let phone = fields.get(3).filter(|s| !s.is_empty()).cloned();
+            ActiveModal::EditCustomer { customer_id } => {
+                let code_raw = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                let name = self
+                    .form_fields
+                    .get(1)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let addr_raw = self.form_fields.get(2).map(|f| f.1.trim()).unwrap_or("");
+                let status_raw = self
+                    .form_fields
+                    .get(3)
+                    .map(|f| f.1.trim().to_lowercase())
+                    .unwrap_or_else(|| "aktif".into());
+                let is_active =
+                    status_raw != "nonaktif" && status_raw != "false" && status_raw != "0";
 
                 let input = UpdateCustomerInput {
+                    code: if code_raw.is_empty() {
+                        None
+                    } else {
+                        Some(code_raw.to_string())
+                    },
                     name,
-                    code,
-                    address,
-                    phone,
-                    active: true,
+                    address: if addr_raw.is_empty() {
+                        None
+                    } else {
+                        Some(addr_raw.to_string())
+                    },
+                    is_active,
                 };
-                match self.store.update_customer(&id, &input) {
-                    Ok(_) => {
+
+                match self.store.update_customer(&customer_id, &input) {
+                    Ok(detail) => {
+                        self.status_msg = format!(
+                            "Perubahan data pelanggan '{}' (v{}) berhasil disimpan.",
+                            detail.name, detail.version
+                        );
                         self.active_modal = None;
-                        self.status_msg = "Data pelanggan berhasil diperbarui.".into();
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
+                    Err(e) => self.form_error = e.0,
+                }
+            }
+            ActiveModal::MergeCustomer { source_id } => {
+                let target_key = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.trim().to_lowercase())
+                    .unwrap_or_default();
+                let reason = self
+                    .form_fields
+                    .get(1)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+
+                let all_custs = self.store.list_customers(&CustomerQuery {
+                    search: None,
+                    active_only: false,
+                });
+                let found_target = all_custs.iter().find(|c| {
+                    c.id != source_id
+                        && (c.name.to_lowercase() == target_key
+                            || c.code
+                                .as_deref()
+                                .map(|code| code.to_lowercase() == target_key)
+                                .unwrap_or(false)
+                            || c.id.to_lowercase() == target_key)
+                });
+
+                let Some(target) = found_target else {
+                    self.form_error =
+                        "Pelanggan tujuan tidak ditemukan. Masukkan Kode (misal P002) atau Nama Pelanggan tujuan yang tepat."
+                            .into();
+                    cx.notify();
+                    return;
+                };
+                let target_id = target.id.clone();
+                let target_name = target.name.clone();
+
+                match self.store.merge_customers(&source_id, &target_id, &reason) {
+                    Ok(()) => {
+                        self.selected_customer_id = Some(target_id);
+                        self.status_msg = format!(
+                            "Pelanggan berhasil digabungkan ke '{}'. Sumber telah dinonaktifkan.",
+                            target_name
+                        );
+                        self.active_modal = None;
                     }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::RecordSale => {
-                let date_str = fields.first().cloned().unwrap_or_default();
-                let reason_str = fields.get(1).cloned().unwrap_or_default();
-
-                let effective_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
-                    Ok(d) => d,
-                    Err(_) => {
-                        self.form_error = "Format tanggal salah. Gunakan YYYY-MM-DD.".into();
-                        return;
-                    }
+                let Some(cid) = self.selected_customer_id.clone() else {
+                    return;
                 };
-
-                let today = self.today_jakarta();
-                if effective_date > today {
-                    self.form_error = "Tanggal transaksi tidak boleh di masa depan.".into();
+                let date_str = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                let Ok(effective_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+                    self.form_error = "Format Tanggal Transaksi harus YYYY-MM-DD.".into();
+                    cx.notify();
                     return;
-                }
-                if effective_date < today && reason_str.trim().is_empty() {
-                    self.form_error = "Tanggal lampau wajib menyertakan alasan.".into();
-                    return;
-                }
+                };
+                let ref_raw = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
+                let reason_raw = self.form_fields.get(2).map(|f| f.1.trim()).unwrap_or("");
 
                 let mut items = Vec::new();
-                for (desc, qty, pr) in &self.sale_items {
-                    if !desc.trim().is_empty() {
-                        let pr_val = match toko_money::rupiah(pr) {
-                            Some(val) if val > 0 => val,
-                            _ => {
-                                self.form_error =
-                                    format!("Harga satuan untuk item '{}' tidak valid.", desc);
-                                return;
-                            }
-                        };
-                        items.push(SaleItemInput {
-                            description: desc.trim().to_string(),
-                            quantity: if qty.trim().is_empty() {
-                                "1".into()
-                            } else {
-                                qty.trim().to_string()
-                            },
-                            unit_price_idr: pr_val,
-                        });
+                for (desc, qty, price_str) in &self.sale_items {
+                    if desc.trim().is_empty() && price_str.trim().is_empty() {
+                        continue;
                     }
-                }
-
-                if items.is_empty() {
-                    self.form_error = "Minimal harus ada satu baris barang yang terisi.".into();
-                    return;
+                    let clean_price: String =
+                        price_str.chars().filter(|c| c.is_ascii_digit()).collect();
+                    let unit_price_idr: i64 = clean_price.parse().unwrap_or(0);
+                    items.push(SaleItemInput {
+                        description: desc.trim().to_string(),
+                        quantity: qty.trim().to_string(),
+                        unit_price_idr,
+                    });
                 }
 
                 let input = InstantSaleInput {
                     effective_date,
-                    reference_no: None,
+                    reference_no: if ref_raw.is_empty() {
+                        None
+                    } else {
+                        Some(ref_raw.to_string())
+                    },
+                    backdate_reason: if reason_raw.is_empty() {
+                        None
+                    } else {
+                        Some(reason_raw.to_string())
+                    },
                     items,
                 };
 
-                let cid = self.selected_customer_id.clone().unwrap_or_default();
                 match self.store.create_instant_sale(&cid, &input) {
                     Ok(total) => {
-                        self.active_modal = None;
                         self.status_msg = format!(
-                            "Penjualan kredit Rp {} berhasil dicatat ke buku piutang.",
-                            format_idr(total)
+                            "Penjualan kredit sebesar {} berhasil diposting ke Buku Piutang.",
+                            format_rupiah(total)
                         );
+                        self.customer_tab = CustomerTab::Ledger;
+                        self.active_modal = None;
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
-                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::RecordPayment => {
-                let date_str = fields.first().cloned().unwrap_or_default();
-                let amount_str = fields.get(1).cloned().unwrap_or_default();
-                let method = fields.get(2).cloned().unwrap_or_default();
-                let reference = fields.get(3).filter(|s| !s.is_empty()).cloned();
-                let note = fields.get(4).filter(|s| !s.is_empty()).cloned();
-                let reason_str = fields.get(5).cloned().unwrap_or_default();
+                let Some(cid) = self.selected_customer_id.clone() else {
+                    return;
+                };
+                let amt_raw = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                let clean_amt: String = amt_raw.chars().filter(|c| c.is_ascii_digit()).collect();
+                let amount_idr: i64 = clean_amt.parse().unwrap_or(0);
 
-                let received_date = match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
-                    Ok(d) => d,
-                    Err(_) => {
-                        self.form_error = "Format tanggal salah. Gunakan YYYY-MM-DD.".into();
-                        return;
-                    }
+                let date_str = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
+                let Ok(received_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+                    self.form_error = "Format Tanggal Diterima harus YYYY-MM-DD.".into();
+                    cx.notify();
+                    return;
                 };
 
-                let today = self.today_jakarta();
-                if received_date > today {
-                    self.form_error = "Tanggal pembayaran tidak boleh di masa depan.".into();
-                    return;
-                }
-                if received_date < today && reason_str.trim().is_empty() {
-                    self.form_error = "Tanggal lampau wajib menyertakan alasan.".into();
-                    return;
-                }
-
-                let amount_idr = match toko_money::rupiah(&amount_str) {
-                    Some(val) if val > 0 => val,
-                    _ => {
-                        self.form_error = "Nominal pembayaran harus berupa angka positif.".into();
-                        return;
-                    }
-                };
+                let method = self
+                    .form_fields
+                    .get(2)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_else(|| "Tunai".into());
+                let ref_raw = self.form_fields.get(3).map(|f| f.1.trim()).unwrap_or("");
+                let note_raw = self.form_fields.get(4).map(|f| f.1.trim()).unwrap_or("");
 
                 let input = RecordPaymentInput {
                     received_date,
                     amount_idr,
                     method,
-                    reference,
-                    note,
+                    reference: if ref_raw.is_empty() {
+                        None
+                    } else {
+                        Some(ref_raw.to_string())
+                    },
+                    note: if note_raw.is_empty() {
+                        None
+                    } else {
+                        Some(note_raw.to_string())
+                    },
                 };
 
-                let cid = self.selected_customer_id.clone().unwrap_or_default();
                 match self.store.record_payment(&cid, &input) {
-                    Ok(payment) => {
-                        self.active_modal = None;
+                    Ok(pay) => {
                         self.status_msg = format!(
-                            "Pembayaran Rp {} berhasil dicatat (Teralokasi: Rp {}, Deposit: Rp {}).",
-                            format_idr(payment.amount_idr),
-                            format_idr(payment.allocated_idr),
-                            format_idr(payment.unallocated_credit_idr)
+                            "Pembayaran {} dicatat (Teralokasi FIFO: {}, Saldo Lebih/Kredit: {}).",
+                            format_rupiah(pay.amount_idr),
+                            format_rupiah(pay.allocated_idr),
+                            format_rupiah(pay.unallocated_credit_idr)
                         );
+                        self.active_modal = None;
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
-                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::ApplyDeposit => {
-                let payment_id = fields.first().cloned().unwrap_or_default();
-                let debit_entry_id = fields.get(1).cloned().unwrap_or_default();
-                let amount_str = fields.get(2).cloned().unwrap_or_default();
-                let reason = fields.get(3).cloned().unwrap_or_default();
-
-                let amount_idr = match toko_money::rupiah(&amount_str) {
-                    Some(val) if val > 0 => val,
-                    _ => {
-                        self.form_error = "Nominal penerapan harus berupa angka positif.".into();
-                        return;
-                    }
+                let Some(cid) = self.selected_customer_id.clone() else {
+                    return;
                 };
+                let pay_id = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let debit_id = self
+                    .form_fields
+                    .get(1)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let amt_raw = self.form_fields.get(2).map(|f| f.1.trim()).unwrap_or("");
+                let clean_amt: String = amt_raw.chars().filter(|c| c.is_ascii_digit()).collect();
+                let amount_idr: i64 = clean_amt.parse().unwrap_or(0);
+                let reason = self
+                    .form_fields
+                    .get(3)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
 
                 let input = ApplyCreditInput {
-                    payment_id,
-                    debit_entry_id,
+                    payment_id: pay_id,
+                    debit_entry_id: debit_id,
                     amount_idr,
                     reason,
                 };
 
-                let cid = self.selected_customer_id.clone().unwrap_or_default();
                 match self.store.apply_credit(&cid, &input) {
                     Ok(()) => {
-                        self.active_modal = None;
                         self.status_msg = format!(
-                            "Saldo kredit Rp {} sukses diterapkan.",
-                            format_idr(amount_idr)
+                            "Saldo kredit sebesar {} berhasil diterapkan ke nota piutang.",
+                            format_rupiah(amount_idr)
                         );
+                        self.active_modal = None;
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
+                    Err(e) => self.form_error = e.0,
+                }
+            }
+            ActiveModal::ReallocatePayment { payment_id } => {
+                let Some(cid) = self.selected_customer_id.clone() else {
+                    return;
+                };
+                let debit_raw = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let amt_raw = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
+                let clean_amt: String = amt_raw.chars().filter(|c| c.is_ascii_digit()).collect();
+                let amount_idr: i64 = clean_amt.parse().unwrap_or(0);
+                let reason = self
+                    .form_fields
+                    .get(2)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+
+                let input = ReallocatePaymentInput {
+                    payment_id,
+                    debit_entry_id: if debit_raw.is_empty() {
+                        None
+                    } else {
+                        Some(debit_raw)
+                    },
+                    amount_idr,
+                    reason,
+                };
+
+                match self.store.reallocate_payment(&cid, &input) {
+                    Ok(()) => {
+                        self.status_msg =
+                            "Realokasi pembayaran berhasil disimpan secara atomik.".into();
+                        self.active_modal = None;
                     }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::ReverseTransaction {
                 customer_id,
                 entry_id,
             } => {
-                let reason = fields.first().cloned().unwrap_or_default();
+                let reason = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
                 match self
                     .store
                     .reverse_transaction(&customer_id, &entry_id, &reason)
                 {
-                    Ok(_) => {
+                    Ok(()) => {
+                        self.status_msg =
+                            "Transaksi berhasil dibalik (reversed) dengan kontra-entry dan alokasi dipulihkan."
+                                .into();
                         self.active_modal = None;
-                        self.status_msg = "Mutasi buku piutang telah dibatalkan/dibalik.".into();
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
-                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
-            ActiveModal::NewUser => {
-                let username = fields.first().cloned().unwrap_or_default();
-                let full_name = fields.get(1).cloned().unwrap_or_default();
-                let role_str = fields.get(2).cloned().unwrap_or_default();
-                let temp_pw = fields.get(3).cloned().unwrap_or_default();
+            ActiveModal::FilterLedgerDate => {
+                let from_raw = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                let to_raw = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
 
-                let role = match role_str.to_lowercase().as_str() {
-                    "owner" => UserRole::Owner,
-                    "viewer" => UserRole::Viewer,
+                let from_date = if from_raw.is_empty() {
+                    None
+                } else {
+                    match NaiveDate::parse_from_str(from_raw, "%Y-%m-%d") {
+                        Ok(d) => Some(d),
+                        Err(_) => {
+                            self.form_error = "Format Dari Tanggal harus YYYY-MM-DD.".into();
+                            cx.notify();
+                            return;
+                        }
+                    }
+                };
+                let to_date = if to_raw.is_empty() {
+                    None
+                } else {
+                    match NaiveDate::parse_from_str(to_raw, "%Y-%m-%d") {
+                        Ok(d) => Some(d),
+                        Err(_) => {
+                            self.form_error = "Format Sampai Tanggal harus YYYY-MM-DD.".into();
+                            cx.notify();
+                            return;
+                        }
+                    }
+                };
+                if let (Some(f), Some(t)) = (from_date, to_date) {
+                    if f > t {
+                        self.form_error =
+                            "Dari Tanggal tidak boleh lebih besar dari Sampai Tanggal.".into();
+                        cx.notify();
+                        return;
+                    }
+                }
+                self.ledger_from = from_date;
+                self.ledger_to = to_date;
+                self.status_msg = "Filter rentang tanggal buku piutang diterapkan.".into();
+                self.active_modal = None;
+            }
+            ActiveModal::NewUser => {
+                let username = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let role_str = self
+                    .form_fields
+                    .get(1)
+                    .map(|f| f.1.trim().to_lowercase())
+                    .unwrap_or_default();
+                let temp_pw = self
+                    .form_fields
+                    .get(2)
+                    .map(|f| f.1.clone())
+                    .unwrap_or_default();
+
+                let role = match role_str.as_str() {
+                    "owner" | "pemilik" => UserRole::Owner,
+                    "viewer" | "pembaca" => UserRole::Viewer,
                     _ => UserRole::Operator,
                 };
 
                 let input = CreateUserInput {
                     username,
-                    full_name,
                     role,
                     temporary_password: temp_pw,
                 };
 
                 match self.store.create_user(&input) {
                     Ok(u) => {
-                        self.active_modal = None;
                         self.status_msg = format!(
-                            "Pengguna {} ({}) berhasil didaftarkan.",
-                            u.username, u.full_name
+                            "Akun '{}' ({}) berhasil dibuat. Wajib ganti kata sandi saat login pertama.",
+                            u.username,
+                            u.role.label()
                         );
+                        self.active_modal = None;
                     }
-                    Err(e) => {
-                        self.form_error = e.0;
+                    Err(e) => self.form_error = e.0,
+                }
+            }
+            ActiveModal::EditUser { user_id } => {
+                let username = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.trim().to_string())
+                    .unwrap_or_default();
+                let role_str = self
+                    .form_fields
+                    .get(1)
+                    .map(|f| f.1.trim().to_lowercase())
+                    .unwrap_or_default();
+                let status_str = self
+                    .form_fields
+                    .get(2)
+                    .map(|f| f.1.trim().to_lowercase())
+                    .unwrap_or_else(|| "aktif".into());
+
+                let role = match role_str.as_str() {
+                    "owner" | "pemilik" => UserRole::Owner,
+                    "viewer" | "pembaca" => UserRole::Viewer,
+                    _ => UserRole::Operator,
+                };
+                let is_active =
+                    status_str != "nonaktif" && status_str != "false" && status_str != "0";
+
+                match self.store.update_user(
+                    &user_id,
+                    &UpdateUserInput {
+                        username,
+                        role,
+                        is_active,
+                    },
+                ) {
+                    Ok(u) => {
+                        self.status_msg = format!("Akun '{}' berhasil diperbarui.", u.username);
+                        self.active_modal = None;
                     }
+                    Err(e) => self.form_error = e.0,
+                }
+            }
+            ActiveModal::ResetUserPassword { user_id, username } => {
+                let temp_pw = self
+                    .form_fields
+                    .get(0)
+                    .map(|f| f.1.clone())
+                    .unwrap_or_default();
+                match self.store.reset_password(&user_id, &temp_pw) {
+                    Ok(()) => {
+                        self.status_msg = format!(
+                            "Kata sandi akun '{}' berhasil direset. Pengguna wajib mengganti sandi saat login.",
+                            username
+                        );
+                        self.active_modal = None;
+                    }
+                    Err(e) => self.form_error = e.0,
                 }
             }
             ActiveModal::ChangeAsOfDate => {
-                let date_str = fields.first().cloned().unwrap_or_default();
-                match NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+                let date_str = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
                     Ok(d) => {
-                        self.aging_as_of = d;
-                        self.active_modal = None;
-                        self.status_msg = format!("Tanggal acuan laporan aging diubah ke {}.", d);
+                        if d > self.today_jakarta() {
+                            self.form_error =
+                                "Tanggal acuan tidak boleh berada di masa depan (API-501).".into();
+                        } else {
+                            self.aging_as_of = d;
+                            self.status_msg =
+                                format!("Tanggal acuan laporan aging diubah ke {}.", d);
+                            self.active_modal = None;
+                        }
                     }
                     Err(_) => {
                         self.form_error = "Format tanggal harus YYYY-MM-DD.".into();
                     }
                 }
             }
+            ActiveModal::Notice { .. } => {
+                self.active_modal = None;
+            }
         }
-
         cx.notify();
     }
 
-    // Penanganan Event Keyboard Global
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let key = &event.keystroke;
 
-        // Jika modal sedang terbuka
+        // 1. Penanganan input saat Modal Dialog terbuka
         if let Some(modal) = &self.active_modal {
-            if key.key == "escape" {
-                self.active_modal = None;
-                cx.notify();
-                return;
-            }
-
-            if key.key == "tab" && !self.form_fields.is_empty() {
-                self.form_active = (self.form_active + 1) % self.form_fields.len();
-                cx.notify();
-                return;
-            }
-
-            if key.key == "enter" {
-                self.submit_modal(cx);
-                return;
-            }
-
-            // Input teks ke modal
-            if matches!(modal, ActiveModal::RecordSale) {
-                let (row, col) = self.sale_active_field;
-                if row < self.sale_items.len() {
-                    let target = match col {
-                        0 => &mut self.sale_items[row].0,
-                        1 => &mut self.sale_items[row].1,
-                        _ => &mut self.sale_items[row].2,
-                    };
-                    if key.key == "backspace" {
-                        target.pop();
-                    } else if let Some(ch) = &key.key_char {
-                        if !ch.chars().any(char::is_control) && target.len() + ch.len() <= 60 {
-                            target.push_str(ch);
+            match key.key.as_str() {
+                "escape" => {
+                    self.active_modal = None;
+                    cx.notify();
+                    return;
+                }
+                "enter" => {
+                    self.submit_modal(cx);
+                    return;
+                }
+                "tab" => {
+                    if *modal == ActiveModal::RecordSale {
+                        let (r, c) = self.sale_active_field;
+                        if r < self.sale_items.len() {
+                            if c < 2 {
+                                self.sale_active_field = (r, c + 1);
+                            } else if r + 1 < self.sale_items.len() {
+                                self.sale_active_field = (r + 1, 0);
+                            } else {
+                                self.sale_active_field = (self.sale_items.len(), 0);
+                            }
+                        } else if !self.form_fields.is_empty() {
+                            let next_f = (c + 1) % self.form_fields.len();
+                            if next_f == 0 {
+                                self.sale_active_field = (0, 0);
+                            } else {
+                                self.sale_active_field = (self.sale_items.len(), next_f);
+                            }
+                        }
+                    } else if !self.form_fields.is_empty() {
+                        self.form_active = (self.form_active + 1) % self.form_fields.len();
+                    }
+                    cx.notify();
+                    return;
+                }
+                "backspace" => {
+                    if *modal == ActiveModal::RecordSale {
+                        let (r, c) = self.sale_active_field;
+                        if r < self.sale_items.len() {
+                            if let Some(item) = self.sale_items.get_mut(r) {
+                                match c {
+                                    0 => {
+                                        item.0.pop();
+                                    }
+                                    1 => {
+                                        item.1.pop();
+                                    }
+                                    _ => {
+                                        item.2.pop();
+                                    }
+                                }
+                            }
+                        } else if let Some(field) = self.form_fields.get_mut(c) {
+                            field.1.pop();
+                        }
+                    } else if let Some(field) = self.form_fields.get_mut(self.form_active) {
+                        field.1.pop();
+                    }
+                    cx.notify();
+                    return;
+                }
+                _ => {
+                    if let Some(ch) = &key.key_char {
+                        if !ch.chars().any(char::is_control) {
+                            if *modal == ActiveModal::RecordSale {
+                                let (r, c) = self.sale_active_field;
+                                if r < self.sale_items.len() {
+                                    if let Some(item) = self.sale_items.get_mut(r) {
+                                        match c {
+                                            0 => item.0.push_str(ch),
+                                            1 => item.1.push_str(ch),
+                                            _ => item.2.push_str(ch),
+                                        }
+                                    }
+                                } else if let Some(field) = self.form_fields.get_mut(c) {
+                                    field.1.push_str(ch);
+                                }
+                            } else if let Some(field) = self.form_fields.get_mut(self.form_active) {
+                                field.1.push_str(ch);
+                            }
+                            cx.notify();
+                            return;
                         }
                     } else if key.key == "space" {
-                        target.push(' ');
+                        if *modal == ActiveModal::RecordSale {
+                            let (r, c) = self.sale_active_field;
+                            if r < self.sale_items.len() {
+                                if let Some(item) = self.sale_items.get_mut(r) {
+                                    if c == 0 {
+                                        item.0.push(' ');
+                                    }
+                                }
+                            } else if let Some(field) = self.form_fields.get_mut(c) {
+                                field.1.push(' ');
+                            }
+                        } else if let Some(field) = self.form_fields.get_mut(self.form_active) {
+                            field.1.push(' ');
+                        }
+                        cx.notify();
+                        return;
                     }
-                }
-            } else if !self.form_fields.is_empty() && self.form_active < self.form_fields.len() {
-                let target = &mut self.form_fields[self.form_active].1;
-                if key.key == "backspace" {
-                    target.pop();
-                } else if let Some(ch) = &key.key_char {
-                    if !ch.chars().any(char::is_control) && target.len() + ch.len() <= 80 {
-                        target.push_str(ch);
-                    }
-                } else if key.key == "space" {
-                    target.push(' ');
                 }
             }
-
-            cx.notify();
             return;
         }
 
-        // Navigasi & Pintasan Keyboard Utama (F2 - F8, Ctrl+N/P/L, Esc)
-        if key.modifiers.control && key.key == "n" {
-            self.open_new_customer_modal();
-            cx.notify();
-            return;
-        }
+        // 2. Pintasan Global & Kontekstual Halaman
         if key.modifiers.control && key.key == "p" {
             self.open_change_password_modal();
             cx.notify();
@@ -762,47 +1259,110 @@ impl Desktop {
             cx.notify();
             return;
         }
+        if key.modifiers.control && key.key == "n" && self.current_view == CurrentView::CustomerList
+        {
+            self.open_new_customer_modal();
+            cx.notify();
+            return;
+        }
+        if key.modifiers.control
+            && key.key == "e"
+            && self.current_view == CurrentView::CustomerDetail
+        {
+            self.open_edit_customer_modal();
+            cx.notify();
+            return;
+        }
+        if key.modifiers.control
+            && key.key == "m"
+            && self.current_view == CurrentView::CustomerDetail
+        {
+            self.open_merge_customer_modal();
+            cx.notify();
+            return;
+        }
 
         match key.key.as_str() {
             "f2" => {
                 self.current_view = CurrentView::CustomerList;
-                self.status_msg = "Tampilan Direktori Pelanggan.".into();
+                self.status_msg = "Modul: Buku Ringkasan Saldo Pelanggan.".into();
                 cx.notify();
             }
             "f3" => {
-                self.open_record_sale_modal();
-                cx.notify();
+                if self.current_view == CurrentView::CustomerDetail {
+                    self.open_record_sale_modal();
+                    cx.notify();
+                }
             }
             "f4" => {
-                self.open_record_payment_modal();
-                cx.notify();
+                if self.current_view == CurrentView::CustomerDetail {
+                    self.open_record_payment_modal();
+                    cx.notify();
+                }
             }
             "f5" => {
-                self.open_apply_deposit_modal();
-                cx.notify();
+                if self.current_view == CurrentView::CustomerDetail {
+                    self.open_apply_deposit_modal_for_payment(None);
+                    cx.notify();
+                }
             }
             "f6" => {
                 self.current_view = CurrentView::AgingReport;
-                self.status_msg = "Laporan Analisis Umur Piutang (Aging).".into();
+                self.status_msg = "Modul: Laporan Analisis Umur Piutang (Aging Report).".into();
                 cx.notify();
             }
             "f8" => {
                 if self.is_owner() {
                     self.current_view = CurrentView::UserManagement;
-                    self.status_msg = "Manajemen Pengguna Aplikasi.".into();
-                    cx.notify();
+                    self.status_msg = "Modul: Manajemen Akun & Otorisasi Pengguna.".into();
                 } else {
-                    self.status_msg = "Akses ditolak: Menu ini khusus Owner.".into();
+                    self.status_msg =
+                        "Akses ditolak: Manajemen Pengguna hanya untuk Pemilik (Owner).".into();
+                }
+                cx.notify();
+            }
+            "enter" => {
+                if self.current_view == CurrentView::CustomerList
+                    && self.selected_customer_id.is_some()
+                {
+                    self.current_view = CurrentView::CustomerDetail;
+                    self.status_msg = "Membuka detail buku piutang pelanggan terpilih.".into();
                     cx.notify();
                 }
             }
+            "up" | "down" => {
+                if self.current_view == CurrentView::CustomerList {
+                    let list = self.store.list_customers(&CustomerQuery {
+                        search: if self.query.is_empty() {
+                            None
+                        } else {
+                            Some(self.query.clone())
+                        },
+                        active_only: self.customer_active_only,
+                    });
+                    if !list.is_empty() {
+                        let cur_idx = self
+                            .selected_customer_id
+                            .as_ref()
+                            .and_then(|id| list.iter().position(|c| &c.id == id))
+                            .unwrap_or(0);
+                        let next_idx = if key.key == "down" {
+                            (cur_idx + 1).min(list.len() - 1)
+                        } else {
+                            cur_idx.saturating_sub(1)
+                        };
+                        self.selected_customer_id = Some(list[next_idx].id.clone());
+                        cx.notify();
+                    }
+                }
+            }
             "escape" => {
-                if self.current_view != CurrentView::CustomerList {
+                if self.current_view == CurrentView::CustomerDetail {
                     self.current_view = CurrentView::CustomerList;
-                    self.status_msg = "Kembali ke Direktori Pelanggan.".into();
-                } else if !self.query.is_empty() {
+                    self.status_msg = "Kembali ke Buku Ringkasan Saldo Pelanggan.".into();
+                } else if self.current_view == CurrentView::CustomerList && !self.query.is_empty() {
                     self.query.clear();
-                    self.status_msg = "Pencarian dibersihkan.".into();
+                    self.status_msg = "Pencarian pelanggan dibersihkan.".into();
                 }
                 cx.notify();
             }
@@ -832,15 +1392,24 @@ impl Desktop {
 impl Render for Desktop {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_owner = self.is_owner();
+        let must_change_pw = self
+            .session
+            .as_ref()
+            .map(|s| s.must_change_password)
+            .unwrap_or(false);
 
         let user_display = match &self.session {
-            Some(u) => format!("{} ({:?})", u.username, u.role),
-            None => "Tamu (Belum Masuk)".into(),
+            Some(u) => format!("{} [{}]", u.username, u.role.label()),
+            None => "Belum Masuk".into(),
         };
 
-        let date_label = format!("WIB · {}", self.today_jakarta().format("%d %b %Y"));
+        let date_label = format!("Asia/Jakarta · {}", self.today_jakarta().format("%d %b %Y"));
 
-        // Frame Aplikasi Enterprise
+        let selected_cust_summary = self
+            .selected_customer_id
+            .as_ref()
+            .and_then(|id| self.store.get_customer(id).ok());
+
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::key_down))
@@ -849,24 +1418,40 @@ impl Render for Desktop {
             .flex()
             .flex_col()
             .overflow_hidden()
-            // 1. Top Navigation Bar Enterprise (Deep Slate Header)
+            // 1. NATIVE WINDOWS SYSTEM MENU STRIP (26px)
             .child(
-                render_top_app_bar_container()
-                    // Logo & Brand
-                    .child(brand_logo_pill())
-                    // Center Navigation Tabs
+                render_system_menu_bar()
+                    // Left: Traditional Native System Menus
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(2.0))
                             .child(
-                                nav_tab_button(
-                                    "Direktori Pelanggan",
+                                system_menu_item("Ganti Akun", "Ctrl+L", false)
+                                    .id("sys-menu-login")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_login_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                system_menu_item("Ubah Sandi", "Ctrl+P", false)
+                                    .id("sys-menu-pw")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_change_password_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(tool_separator())
+                            .child(
+                                system_menu_item(
+                                    "Pelanggan",
                                     "F2",
-                                    self.current_view == CurrentView::CustomerList,
+                                    self.current_view == CurrentView::CustomerList
+                                        || self.current_view == CurrentView::CustomerDetail,
                                 )
-                                .id("nav-tab-cust")
+                                .id("sys-menu-cust")
                                 .on_click(cx.listener(
                                     |this, _, _, cx| {
                                         this.current_view = CurrentView::CustomerList;
@@ -875,12 +1460,12 @@ impl Render for Desktop {
                                 )),
                             )
                             .child(
-                                nav_tab_button(
+                                system_menu_item(
                                     "Laporan Aging",
                                     "F6",
                                     self.current_view == CurrentView::AgingReport,
                                 )
-                                .id("nav-tab-aging")
+                                .id("sys-menu-aging")
                                 .on_click(cx.listener(
                                     |this, _, _, cx| {
                                         this.current_view = CurrentView::AgingReport;
@@ -890,12 +1475,12 @@ impl Render for Desktop {
                             )
                             .when(is_owner, |d| {
                                 d.child(
-                                    nav_tab_button(
-                                        "Manajemen Pengguna",
+                                    system_menu_item(
+                                        "Manajemen Akun",
                                         "F8",
                                         self.current_view == CurrentView::UserManagement,
                                     )
-                                    .id("nav-tab-users")
+                                    .id("sys-menu-users")
                                     .on_click(cx.listener(
                                         |this, _, _, cx| {
                                             this.current_view = CurrentView::UserManagement;
@@ -905,155 +1490,356 @@ impl Render for Desktop {
                                 )
                             }),
                     )
-                    // Right: User Profile & Quick Switch
-                    .child(
-                        div().flex().items_center().gap(px(10.0)).child(
-                            div()
-                                .id("btn-user-profile")
-                                .h(px(30.0))
-                                .px(px(8.0))
-                                .rounded(px(4.0))
-                                .bg(rgb(0x1E293B))
-                                .border_1()
-                                .border_color(rgb(0x334155))
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .cursor_pointer()
-                                .hover(|d| d.bg(rgb(0x334155)))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.open_login_modal();
-                                    cx.notify();
-                                }))
-                                .child(
-                                    div()
-                                        .w(px(18.0))
-                                        .h(px(18.0))
-                                        .rounded_full()
-                                        .bg(rgb(Theme::PRIMARY))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_size(px(10.0))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(rgb(0xFFFFFF))
-                                        .child("👤"),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(11.5))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(rgb(Theme::TEXT_ON_DARK))
-                                        .child(user_display.clone()),
-                                ),
-                        ),
-                    ),
-            )
-            // 2. Action Toolbar Kontekstual (Putih Bersih)
-            .child(
-                render_toolbar_container()
-                    // Left: Quick Action Buttons
+                    // Right: Quick Role Switcher (untuk simulasi izin Owner / Operator / Viewer)
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                primary_action_button("+ Belanja Kredit", "F3")
-                                    .id("tool-btn-sale")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.open_record_sale_modal();
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                secondary_action_button("+ Pembayaran", "F4")
-                                    .id("tool-btn-pay")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.open_record_payment_modal();
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                secondary_action_button("Terapkan Saldo", "F5")
-                                    .id("tool-btn-deposit")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.open_apply_deposit_modal();
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(tool_separator())
-                            .child(
-                                secondary_action_button("+ Pelanggan Baru", "Ctrl+N")
-                                    .id("tool-btn-add-cust")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.open_new_customer_modal();
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                secondary_action_button("Ganti Sandi", "Ctrl+P")
-                                    .id("tool-btn-change-pw")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.open_change_password_modal();
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    // Right: Quick Search Box
-                    .child(
-                        div()
-                            .w(px(280.0))
-                            .h(px(28.0))
-                            .bg(rgb(Theme::BG_APP))
-                            .border_1()
-                            .border_color(rgb(Theme::BORDER_STRONG))
-                            .rounded(px(4.0))
-                            .px(px(8.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
+                            .gap(px(4.0))
                             .child(
                                 div()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(Theme::TEXT_LIGHT))
-                                    .child("🔍"),
-                            )
-                            .child(if self.query.is_empty() {
-                                div()
-                                    .text_size(px(11.5))
+                                    .text_size(px(10.5))
                                     .text_color(rgb(Theme::TEXT_MUTED))
-                                    .child("Cari pelanggan (Ketik langsung)...")
-                            } else {
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child(self.query.clone())
-                            }),
+                                    .child("Simulasi Hak Akses:"),
+                            )
+                            .child(self.render_role_switch_chip(
+                                "role-sw-owner",
+                                "Owner",
+                                UserRole::Owner,
+                                cx,
+                            ))
+                            .child(self.render_role_switch_chip(
+                                "role-sw-op",
+                                "Operator",
+                                UserRole::Operator,
+                                cx,
+                            ))
+                            .child(self.render_role_switch_chip(
+                                "role-sw-view",
+                                "Viewer",
+                                UserRole::Viewer,
+                                cx,
+                            )),
                     ),
             )
-            // 3. Konten Utama
+            // 2. MAIN WORKSPACE: LEFT NATIVE EXPLORER SIDEBAR + RIGHT PAGE PANEL
             .child(
                 div()
                     .flex_1()
+                    .flex()
                     .overflow_hidden()
-                    .child(match self.current_view {
-                        CurrentView::CustomerList => self.render_customer_list_view(cx),
-                        CurrentView::CustomerDetail => self.render_customer_detail_view(cx),
-                        CurrentView::AgingReport => self.render_aging_report_view(cx),
-                        CurrentView::UserManagement => self.render_user_management_view(cx),
-                    }),
+                    // Left Docked Explorer Sidebar (210px)
+                    .child(
+                        render_left_sidebar_container()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(sidebar_section_header("MODUL UTAMA"))
+                                    .child(
+                                        sidebar_nav_item(
+                                            "▤",
+                                            "Ringkasan Pelanggan",
+                                            "F2",
+                                            self.current_view == CurrentView::CustomerList,
+                                        )
+                                        .id("side-nav-cust-list")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.current_view = CurrentView::CustomerList;
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                    // Sub-node pelanggan yang sedang aktif/terpilih
+                                    .when_some(selected_cust_summary, |d, cust| {
+                                        let is_detail =
+                                            self.current_view == CurrentView::CustomerDetail;
+                                        let label = match &cust.code {
+                                            Some(c) => format!("└ [{}] {}", c, cust.name),
+                                            None => format!("└ {}", cust.name),
+                                        };
+                                        d.child(
+                                            div()
+                                                .id("side-nav-cust-detail")
+                                                .h(px(26.0))
+                                                .mx(px(6.0))
+                                                .pl(px(18.0))
+                                                .pr(px(8.0))
+                                                .rounded(px(3.0))
+                                                .bg(rgb(if is_detail {
+                                                    Theme::BG_SIDEBAR_ACTIVE
+                                                } else {
+                                                    Theme::BG_SIDEBAR
+                                                }))
+                                                .border_1()
+                                                .border_color(rgb(if is_detail {
+                                                    Theme::PRIMARY_BORDER
+                                                } else {
+                                                    Theme::BG_SIDEBAR
+                                                }))
+                                                .flex()
+                                                .items_center()
+                                                .overflow_hidden()
+                                                .whitespace_nowrap()
+                                                .cursor_pointer()
+                                                .hover(|el| el.bg(rgb(0xE2E8F0)))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.current_view = CurrentView::CustomerDetail;
+                                                    cx.notify();
+                                                }))
+                                                .child(
+                                                    div()
+                                                        .text_size(px(11.0))
+                                                        .font_weight(if is_detail {
+                                                            FontWeight::BOLD
+                                                        } else {
+                                                            FontWeight::MEDIUM
+                                                        })
+                                                        .text_color(rgb(if is_detail {
+                                                            Theme::PRIMARY_HOVER
+                                                        } else {
+                                                            Theme::TEXT_SECONDARY
+                                                        }))
+                                                        .child(label),
+                                                ),
+                                        )
+                                    })
+                                    .child(
+                                        sidebar_nav_item(
+                                            "◷",
+                                            "Laporan Umur Piutang",
+                                            "F6",
+                                            self.current_view == CurrentView::AgingReport,
+                                        )
+                                        .id("side-nav-aging")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.current_view = CurrentView::AgingReport;
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                    .child(sidebar_section_header("ADMINISTRASI & SESI"))
+                                    .when(is_owner, |d| {
+                                        d.child(
+                                            sidebar_nav_item(
+                                                "⚙",
+                                                "Manajemen Pengguna",
+                                                "F8",
+                                                self.current_view == CurrentView::UserManagement,
+                                            )
+                                            .id("side-nav-users")
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.current_view = CurrentView::UserManagement;
+                                                    cx.notify();
+                                                }),
+                                            ),
+                                        )
+                                    })
+                                    .child(
+                                        sidebar_nav_item("🔑", "Ubah Kata Sandi", "Ctrl+P", false)
+                                            .id("side-nav-pw")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_change_password_modal();
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(
+                                        sidebar_nav_item(
+                                            "⇄",
+                                            "Ganti Akun / Login",
+                                            "Ctrl+L",
+                                            false,
+                                        )
+                                        .id("side-nav-login")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.open_login_modal();
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    ),
+                            )
+                            // Bottom Docked Session & Shortcut Panel
+                            .child(self.render_sidebar_footer_panel()),
+                    )
+                    // Right Workspace Area (Contextual Toolbar + Content)
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .child(if must_change_pw {
+                                self.render_password_change_required_view(cx)
+                            } else {
+                                match self.current_view {
+                                    CurrentView::CustomerList => self.render_customer_list_view(cx),
+                                    CurrentView::CustomerDetail => {
+                                        self.render_customer_detail_view(cx)
+                                    }
+                                    CurrentView::AgingReport => self.render_aging_report_view(cx),
+                                    CurrentView::UserManagement => {
+                                        self.render_user_management_view(cx)
+                                    }
+                                }
+                            }),
+                    ),
             )
-            // 4. Modern Enterprise Status Bar
-            .child(StatusBar::new(&self.status_msg, &date_label, &user_display).render())
-            // 5. Modal Dialogs Overlay
+            // 3. NATIVE DESKTOP STATUS BAR (24px)
+            .child(
+                StatusBar::new(
+                    &self.status_msg,
+                    self.active_module_name(),
+                    &date_label,
+                    &user_display,
+                )
+                .render(),
+            )
+            // 4. MODAL DIALOGS OVERLAY
             .children(self.render_modal_overlay(cx))
     }
 }
 
-// Implementasi View Enterprise
 impl Desktop {
+    fn render_role_switch_chip(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        role: UserRole,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let is_current = self
+            .session
+            .as_ref()
+            .map(|s| s.role == role)
+            .unwrap_or(false);
+        div()
+            .id(id)
+            .h(px(19.0))
+            .px(px(7.0))
+            .rounded(px(2.0))
+            .bg(rgb(if is_current {
+                Theme::PRIMARY
+            } else {
+                Theme::BG_CARD
+            }))
+            .border_1()
+            .border_color(rgb(if is_current {
+                Theme::PRIMARY_HOVER
+            } else {
+                Theme::BORDER_STRONG
+            }))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.store.switch_session_role(role);
+                this.session = this.store.current_session();
+                if role != UserRole::Owner && this.current_view == CurrentView::UserManagement {
+                    this.current_view = CurrentView::CustomerList;
+                }
+                this.status_msg = format!("Beralih simulasi sesi ke peran {}.", role.label());
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .text_size(px(10.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(if is_current {
+                        0xFFFFFF
+                    } else {
+                        Theme::TEXT_SECONDARY
+                    }))
+                    .child(label),
+            )
+    }
+
+    fn render_sidebar_footer_panel(&self) -> Div {
+        let shortcut_hint = match self.current_view {
+            CurrentView::CustomerList => "Ketik: Cari • ↑↓: Pilih • Enter: Detail • Ctrl+N: Baru",
+            CurrentView::CustomerDetail => "F3: Belanja • F4: Bayar • F5: Kredit • Esc: Kembali",
+            CurrentView::AgingReport => "Klik kartu umur untuk filter rincian pelanggan",
+            CurrentView::UserManagement => "Kelola pengguna, peran, dan reset sandi sementara",
+        };
+
+        div()
+            .m(px(6.0))
+            .p(px(8.0))
+            .bg(rgb(Theme::BG_CARD))
+            .border_1()
+            .border_color(rgb(Theme::BORDER_DEFAULT))
+            .rounded(px(3.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(10.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(Theme::TEXT_MUTED))
+                    .child("PETUNJUK HALAMAN AKTIF"),
+            )
+            .child(
+                div()
+                    .text_size(px(10.5))
+                    .text_color(rgb(Theme::TEXT_SECONDARY))
+                    .child(shortcut_hint),
+            )
+    }
+
+    fn render_password_change_required_view(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .p(px(24.0))
+            .gap(px(12.0))
+            .child(
+                div()
+                    .w(px(460.0))
+                    .p(px(20.0))
+                    .bg(rgb(Theme::BG_CARD))
+                    .border_1()
+                    .border_color(rgb(Theme::BADGE_WARNING_BORDER))
+                    .rounded(px(4.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(Theme::BADGE_WARNING_TEXT))
+                            .child("Penggantian Kata Sandi Sementara Diwajibkan (AC-019)"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(rgb(Theme::TEXT_SECONDARY))
+                            .child("Akun Anda menggunakan kata sandi sementara setelah pembuatan atau reset. Sesuai kebijakan keamanan, akses ke modul bisnis dikunci hingga Anda mengganti kata sandi (minimal 15 karakter)."),
+                    )
+                    .child(
+                        primary_action_button("Ganti Kata Sandi Sekarang", "Ctrl+P")
+                            .id("btn-force-change-pw")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_change_password_modal();
+                                cx.notify();
+                            })),
+                    ),
+            )
+    }
+
+    // =========================================================================
+    // HALAMAN 1: BUKU RINGKASAN SALDO PELANGGAN (CustomerList)
+    // Toolbar kontekstual: HANYA tombol terkait direktori pelanggan & pencarian
+    // =========================================================================
     fn render_customer_list_view(&self, cx: &mut Context<Self>) -> Div {
         let q = CustomerQuery {
             search: if self.query.is_empty() {
@@ -1061,43 +1847,70 @@ impl Desktop {
             } else {
                 Some(self.query.clone())
             },
-            active_only: false,
+            active_only: self.customer_active_only,
         };
         let customers = self.store.list_customers(&q);
         let total_customers = customers.len();
-        let total_piutang: i64 = customers.iter().map(|c| c.total_outstanding_idr).sum();
+        let total_piutang: i64 = customers.iter().map(|c| c.outstanding_idr).sum();
         let total_deposit: i64 = customers.iter().map(|c| c.customer_credit_idr).sum();
+        let total_over_60: i64 = customers.iter().map(|c| c.aging.days_over_60).sum();
 
+        // Kolom persis seperti Buku Ringkasan Saldo Pelanggan di Web & CustomerSummary Contract
         let columns = vec![
             GridColumn {
                 title: "KODE",
-                width_px: 85.0,
+                width_px: 72.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
                 title: "NAMA PELANGGAN",
-                width_px: 260.0,
+                width_px: 195.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "WILAYAH / ALAMAT",
-                width_px: 280.0,
-                align: ColumnAlign::Left,
+                title: "STATUS",
+                width_px: 72.0,
+                align: ColumnAlign::Center,
             },
             GridColumn {
                 title: "TOTAL PIUTANG",
-                width_px: 160.0,
+                width_px: 120.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "SALDO KREDIT (DEPOSIT)",
-                width_px: 175.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "STATUS AKUN",
+                title: "SALDO KREDIT",
                 width_px: 110.0,
-                align: ColumnAlign::Center,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "0–15 HARI",
+                width_px: 95.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "16–30 HARI",
+                width_px: 95.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "31–45 HARI",
+                width_px: 95.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "46–60 HARI",
+                width_px: 95.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: ">60 HARI",
+                width_px: 110.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "PERLU DITINJAU",
+                width_px: 110.0,
+                align: ColumnAlign::Right,
             },
         ];
 
@@ -1106,225 +1919,467 @@ impl Desktop {
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_APP))
-            .p(px(12.0))
-            .gap(px(10.0))
-            // KPI Cards Enterprise
+            .overflow_hidden()
+            // CONTEXTUAL COMMAND BAR: HANYA AKSI DAFTAR PELANGGAN
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(self.enterprise_kpi_card(
-                        "TOTAL PELANGGAN",
-                        format!("{} Entitas", total_customers),
-                        "Terdaftar aktif di sistem toko",
-                        Theme::TEXT_PRIMARY,
-                        0x64748B,
-                    ))
-                    .child(self.enterprise_kpi_card(
-                        "TOTAL PIUTANG BERJALAN",
-                        format!("Rp {}", format_idr(total_piutang)),
-                        "Kewajiban pembayaran belum lunas",
-                        Theme::BADGE_DEBIT_TEXT,
-                        Theme::BADGE_DEBIT_BORDER,
-                    ))
-                    .child(self.enterprise_kpi_card(
-                        "TOTAL SALDO KREDIT (DEPOSIT)",
-                        format!("Rp {}", format_idr(total_deposit)),
-                        "Kelebihan pembayaran dapat dialokasikan",
-                        Theme::PRIMARY,
-                        Theme::PRIMARY_BORDER,
-                    )),
+                render_toolbar_container()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.5))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                                    .child("Buku Ringkasan Saldo Pelanggan"),
+                            )
+                            .child(tool_separator())
+                            .when(self.can_write(), |d| {
+                                d.child(
+                                    primary_action_button("+ Tambah Pelanggan", "Ctrl+N")
+                                        .id("tool-cust-add")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.open_new_customer_modal();
+                                            cx.notify();
+                                        })),
+                                )
+                            })
+                            .when(self.selected_customer_id.is_some(), |d| {
+                                d.child(
+                                    secondary_action_button("Buka Detail Buku Piutang", "Enter")
+                                        .id("tool-cust-open")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.current_view = CurrentView::CustomerDetail;
+                                            cx.notify();
+                                        })),
+                                )
+                            })
+                            .child(
+                                secondary_action_button(
+                                    if self.customer_active_only {
+                                        "Filter: Hanya Aktif"
+                                    } else {
+                                        "Filter: Semua Status"
+                                    },
+                                    "",
+                                )
+                                .id("tool-cust-filter-active")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.customer_active_only = !this.customer_active_only;
+                                    cx.notify();
+                                })),
+                            ),
+                    )
+                    // Right: Contextual Search Box
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .w(px(250.0))
+                                    .h(px(26.0))
+                                    .bg(rgb(Theme::BG_CARD))
+                                    .border_1()
+                                    .border_color(rgb(Theme::BORDER_STRONG))
+                                    .rounded(px(3.0))
+                                    .px(px(8.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(if self.query.is_empty() {
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(Theme::TEXT_LIGHT))
+                                            .child("Cari nama atau kode pelanggan...")
+                                    } else {
+                                        div()
+                                            .text_size(px(11.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(rgb(Theme::TEXT_PRIMARY))
+                                            .child(self.query.clone())
+                                    }),
+                            )
+                            .when(!self.query.is_empty(), |d| {
+                                d.child(
+                                    secondary_action_button("Reset Cari", "Esc")
+                                        .id("tool-cust-clear-search")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.query.clear();
+                                            cx.notify();
+                                        })),
+                                )
+                            }),
+                    ),
             )
-            // Container Tabel DBGrid
+            // WORKSPACE BODY
             .child(
                 div()
                     .flex_1()
-                    .bg(rgb(Theme::BG_CARD))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(6.0))
-                    .shadow_sm()
                     .flex()
                     .flex_col()
+                    .p(px(10.0))
+                    .gap(px(8.0))
                     .overflow_hidden()
-                    .child(render_grid_header(&columns))
+                    // 4 Native Summary Boxes (Sesuai Web CustomerList)
                     .child(
                         div()
-                            .id("cust-list-scroll")
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(self.native_summary_box(
+                                "TOTAL PELANGGAN TERDAFTAR",
+                                format!("{} Pelanggan", total_customers),
+                                "Aktif dan terpantau dalam buku piutang",
+                                Theme::TEXT_PRIMARY,
+                                Theme::BORDER_STRONG,
+                            ))
+                            .child(self.native_summary_box(
+                                "TOTAL PIUTANG TERBUKA",
+                                format_rupiah(total_piutang),
+                                "Total piutang belum terbayar",
+                                Theme::TEXT_PRIMARY,
+                                Theme::PRIMARY,
+                            ))
+                            .child(self.native_summary_box(
+                                "SALDO KREDIT (DEPOSIT)",
+                                format_rupiah(total_deposit),
+                                "Kelebihan bayar belum dialokasikan",
+                                Theme::BADGE_DEPOSIT_TEXT,
+                                Theme::BADGE_DEPOSIT_BORDER,
+                            ))
+                            .child(self.native_summary_box(
+                                "PIUTANG KRITIS (>60 HARI)",
+                                format_rupiah(total_over_60),
+                                "Memerlukan penagihan intensif",
+                                Theme::BADGE_DEBIT_TEXT,
+                                Theme::BADGE_DEBIT_BORDER,
+                            )),
+                    )
+                    // Native DBGrid Container
+                    .child(
+                        div()
                             .flex_1()
-                            .children(if customers.is_empty() {
-                                vec![render_empty_state("Tidak ada data pelanggan yang sesuai dengan kriteria pencarian.").into_any_element()]
-                            } else {
-                                customers
-                                    .into_iter()
-                                    .enumerate()
-                                    .map(|(idx, cust)| {
-                                        let is_selected = self.selected_customer_id.as_deref() == Some(&cust.id);
-                                        let bg_color = if is_selected {
-                                            Theme::BG_ROW_SELECTED
-                                        } else if idx % 2 == 1 {
-                                            Theme::BG_ROW_ALT
-                                        } else {
-                                            Theme::BG_CARD
-                                        };
+                            .bg(rgb(Theme::BG_CARD))
+                            .border_1()
+                            .border_color(rgb(Theme::BORDER_STRONG))
+                            .rounded(px(3.0))
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .child(render_grid_header(&columns))
+                            .child(
+                                div()
+                                    .id("cust-list-scroll")
+                                    .flex_1()
+                                    .children(if customers.is_empty() {
+                                        vec![
+                                            render_empty_state(
+                                                "Tidak ada pelanggan yang ditemukan.",
+                                            )
+                                            .into_any_element(),
+                                        ]
+                                    } else {
+                                        customers
+                                            .into_iter()
+                                            .enumerate()
+                                            .map(|(idx, cust)| {
+                                                let is_selected =
+                                                    self.selected_customer_id.as_deref()
+                                                        == Some(&cust.id);
+                                                let bg_color = if is_selected {
+                                                    Theme::BG_ROW_SELECTED
+                                                } else if idx % 2 == 1 {
+                                                    Theme::BG_ROW_ALT
+                                                } else {
+                                                    Theme::BG_CARD
+                                                };
 
-                                        let cust_id = cust.id.clone();
-                                        let cust_name = cust.name.clone();
-                                        let code_str = cust.code.clone().unwrap_or_else(|| "—".into());
-                                        let addr_str = cust.address.clone().unwrap_or_else(|| "—".into());
+                                                let cust_id = cust.id.clone();
+                                                let cust_name = cust.name.clone();
+                                                let code_str = cust
+                                                    .code
+                                                    .clone()
+                                                    .unwrap_or_else(|| "—".into());
+                                                let exc_total = cust.aging.exception_total();
 
-                                        div()
-                                            .id(("cust-row", idx))
-                                            .h(px(32.0))
-                                            .bg(rgb(bg_color))
-                                            .border_b_1()
-                                            .border_color(rgb(Theme::GRID_LINE))
-                                            .when(is_selected, |d| {
-                                                d.border_l_2().border_color(rgb(Theme::PRIMARY))
+                                                div()
+                                                    .id(("cust-row", idx))
+                                                    .h(px(28.0))
+                                                    .bg(rgb(bg_color))
+                                                    .border_b_1()
+                                                    .border_color(rgb(Theme::GRID_LINE))
+                                                    .flex()
+                                                    .items_center()
+                                                    .cursor_pointer()
+                                                    .when(!is_selected, |d| {
+                                                        d.hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+                                                    })
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.selected_customer_id =
+                                                                Some(cust_id.clone());
+                                                            this.current_view =
+                                                                CurrentView::CustomerDetail;
+                                                            this.status_msg = format!(
+                                                                "Membuka rincian buku piutang pelanggan '{}'.",
+                                                                cust_name
+                                                            );
+                                                            cx.notify();
+                                                        },
+                                                    ))
+                                                    .child(grid_row_indicator(
+                                                        idx + 1,
+                                                        is_selected,
+                                                    ))
+                                                    .child(grid_cell(
+                                                        code_str,
+                                                        72.0,
+                                                        ColumnAlign::Center,
+                                                        is_selected,
+                                                    ))
+                                                    .child(grid_cell_styled(
+                                                        cust.name,
+                                                        195.0,
+                                                        ColumnAlign::Left,
+                                                        Theme::TEXT_PRIMARY,
+                                                        FontWeight::BOLD,
+                                                        None,
+                                                    ))
+                                                    .child(if cust.is_active {
+                                                        grid_badge(
+                                                            "Aktif",
+                                                            Theme::BADGE_CREDIT_TEXT,
+                                                            Theme::BADGE_CREDIT_BG,
+                                                            Theme::BADGE_CREDIT_BORDER,
+                                                            72.0,
+                                                        )
+                                                    } else {
+                                                        grid_badge(
+                                                            "Nonaktif",
+                                                            Theme::TEXT_MUTED,
+                                                            0xF1F5F9,
+                                                            0xCBD5E1,
+                                                            72.0,
+                                                        )
+                                                    })
+                                                    .child(grid_cell_styled(
+                                                        format_rupiah(cust.outstanding_idr),
+                                                        120.0,
+                                                        ColumnAlign::Right,
+                                                        if cust.outstanding_idr > 0 {
+                                                            Theme::TEXT_PRIMARY
+                                                        } else {
+                                                            Theme::TEXT_LIGHT
+                                                        },
+                                                        FontWeight::BOLD,
+                                                        None,
+                                                    ))
+                                                    .child(grid_cell_styled(
+                                                        if cust.customer_credit_idr > 0 {
+                                                            format_rupiah(cust.customer_credit_idr)
+                                                        } else {
+                                                            "Rp 0".into()
+                                                        },
+                                                        110.0,
+                                                        ColumnAlign::Right,
+                                                        if cust.customer_credit_idr > 0 {
+                                                            Theme::BADGE_DEPOSIT_TEXT
+                                                        } else {
+                                                            Theme::TEXT_LIGHT
+                                                        },
+                                                        if cust.customer_credit_idr > 0 {
+                                                            FontWeight::BOLD
+                                                        } else {
+                                                            FontWeight::NORMAL
+                                                        },
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        cust.aging.days_0_15,
+                                                        95.0,
+                                                        Theme::TEXT_PRIMARY,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        cust.aging.days_16_30,
+                                                        95.0,
+                                                        Theme::TEXT_PRIMARY,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        cust.aging.days_31_45,
+                                                        95.0,
+                                                        Theme::BADGE_WARNING_TEXT,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        cust.aging.days_46_60,
+                                                        95.0,
+                                                        Theme::BADGE_WARNING_TEXT,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        cust.aging.days_over_60,
+                                                        110.0,
+                                                        Theme::BADGE_DEBIT_TEXT,
+                                                        if cust.aging.days_over_60 > 0 {
+                                                            Some(Theme::BADGE_DEBIT_BG)
+                                                        } else {
+                                                            None
+                                                        },
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        exc_total,
+                                                        110.0,
+                                                        Theme::BADGE_EXCEPTION_TEXT,
+                                                        if exc_total > 0 {
+                                                            Some(Theme::BADGE_EXCEPTION_BG)
+                                                        } else {
+                                                            None
+                                                        },
+                                                    ))
+                                                    .into_any_element()
                                             })
-                                            .flex()
-                                            .items_center()
-                                            .cursor_pointer()
-                                            .when(!is_selected, |d| d.hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER))))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.selected_customer_id = Some(cust_id.clone());
-                                                this.current_view = CurrentView::CustomerDetail;
-                                                this.status_msg = format!("Membuka buku piutang pelanggan {}.", cust_name);
-                                                cx.notify();
-                                            }))
-                                            .child(grid_cell(code_str, 85.0, ColumnAlign::Center, is_selected))
-                                            .child(grid_cell(cust.name, 260.0, ColumnAlign::Left, is_selected))
-                                            .child(grid_cell(addr_str, 280.0, ColumnAlign::Left, is_selected))
-                                            .child(grid_cell(format_idr(cust.total_outstanding_idr), 160.0, ColumnAlign::Right, is_selected))
-                                            .child(grid_cell(format_idr(cust.customer_credit_idr), 175.0, ColumnAlign::Right, is_selected))
-                                            .child(if cust.active {
-                                                grid_badge("Aktif", Theme::BADGE_CREDIT_TEXT, Theme::BADGE_CREDIT_BG, Theme::BADGE_CREDIT_BORDER, 110.0)
-                                            } else {
-                                                grid_badge("Nonaktif", Theme::TEXT_MUTED, 0xF1F5F9, 0xE2E8F0, 110.0)
-                                            })
-                                            .into_any_element()
-                                    })
-                                    .collect()
-                            }),
+                                            .collect()
+                                    }),
+                            ),
                     ),
             )
     }
 
+    fn aging_amount_cell(
+        &self,
+        amount: i64,
+        width: f32,
+        active_color: u32,
+        bg_tint: Option<u32>,
+    ) -> Div {
+        grid_cell_styled(
+            format_rupiah(amount),
+            width,
+            ColumnAlign::Right,
+            if amount > 0 {
+                active_color
+            } else {
+                Theme::TEXT_LIGHT
+            },
+            if amount > 0 {
+                FontWeight::BOLD
+            } else {
+                FontWeight::NORMAL
+            },
+            bg_tint,
+        )
+    }
+
+    // =========================================================================
+    // HALAMAN 2: DETAIL PELANGGAN (Buku Piutang & Riwayat Pembayaran)
+    // Toolbar kontekstual: HANYA tombol transaksi & identitas pelanggan ini
+    // =========================================================================
     fn render_customer_detail_view(&self, cx: &mut Context<Self>) -> Div {
         let Some(cid) = &self.selected_customer_id else {
-            return div().child("Pelanggan belum dipilih.");
+            return div().p(px(16.0)).child("Pelanggan belum dipilih.");
         };
 
         let detail = match self.store.get_customer(cid) {
             Ok(d) => d,
-            Err(_) => return div().child("Pelanggan tidak ditemukan."),
+            Err(_) => return div().p(px(16.0)).child("Pelanggan tidak ditemukan."),
         };
 
-        let ledger = self
+        let ledger_page = self
             .store
             .get_ledger(
                 cid,
                 &LedgerQuery {
-                    from: None,
-                    to: None,
-                    order_desc: false,
+                    from: self.ledger_from,
+                    to: self.ledger_to,
+                    order_desc: self.ledger_sort_desc,
                 },
             )
-            .unwrap_or_default();
+            .unwrap_or(LedgerPage {
+                entries: Vec::new(),
+                summary: LedgerSummary {
+                    outstanding_idr: detail.outstanding_idr,
+                    customer_credit_idr: detail.customer_credit_idr,
+                    ledger_balance_idr: detail.outstanding_idr - detail.customer_credit_idr,
+                },
+            });
         let payments = self.store.list_payments(cid).unwrap_or_default();
 
-        let detail_code_str = detail.code.clone().unwrap_or_else(|| "—".into());
-        let detail_addr_str = detail
+        let code_str = detail.code.clone().unwrap_or_else(|| "Tanpa Kode".into());
+        let addr_str = detail
             .address
             .clone()
-            .unwrap_or_else(|| "Alamat belum tercatat di data master".into());
+            .unwrap_or_else(|| "Alamat belum tercatat".into());
+        let is_lunas = detail.outstanding_idr == 0;
+        let has_credit = detail.customer_credit_idr > 0;
+        let has_date_filter = self.ledger_from.is_some() || self.ledger_to.is_some();
 
         div()
             .flex_1()
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_APP))
-            .p(px(12.0))
-            .gap(px(10.0))
-            // Header Pelanggan Enterprise
+            .overflow_hidden()
+            // CONTEXTUAL COMMAND BAR: HANYA AKSI PELANGGAN TERPILIH
             .child(
-                div()
-                    .h(px(46.0))
-                    .bg(rgb(Theme::BG_CARD))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(6.0))
-                    .shadow_sm()
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
+                render_toolbar_container()
+                    // Left: Back & Transaction actions for this customer
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(12.0))
+                            .gap(px(6.0))
                             .child(
-                                div()
-                                    .id("btn-back-to-list")
-                                    .h(px(28.0))
-                                    .px(px(10.0))
-                                    .bg(rgb(Theme::BG_APP))
-                                    .border_1()
-                                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                                    .rounded(px(4.0))
-                                    .flex()
-                                    .items_center()
-                                    .cursor_pointer()
-                                    .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+                                secondary_action_button("← Kembali ke Ringkasan", "Esc")
+                                    .id("tool-det-back")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.current_view = CurrentView::CustomerList;
                                         cx.notify();
-                                    }))
-                                    .child(
-                                        div()
-                                            .text_size(px(11.5))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(rgb(Theme::TEXT_PRIMARY))
-                                            .child("← Kembali (Esc)"),
-                                    ),
+                                    })),
                             )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
+                            .when(self.can_write() && detail.is_active, |d| {
+                                d.child(tool_separator())
                                     .child(
-                                        div()
-                                            .text_size(px(14.5))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(Theme::TEXT_PRIMARY))
-                                            .child(detail.name),
+                                        primary_action_button("+ Catat Belanja / Piutang", "F3")
+                                            .id("tool-det-sale")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_record_sale_modal();
+                                                cx.notify();
+                                            })),
                                     )
                                     .child(
-                                        div()
-                                            .px(px(6.0))
-                                            .py(px(1.0))
-                                            .rounded(px(3.0))
-                                            .bg(rgb(Theme::PRIMARY_LIGHT))
-                                            .border_1()
-                                            .border_color(rgb(Theme::PRIMARY_BORDER))
-                                            .text_size(px(10.5))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(Theme::PRIMARY))
-                                            .child(detail_code_str),
+                                        secondary_action_button("+ Catat Pembayaran", "F4")
+                                            .id("tool-det-pay")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_record_payment_modal();
+                                                cx.notify();
+                                            })),
                                     )
-                                    .child(
-                                        div()
-                                            .text_size(px(11.5))
-                                            .text_color(rgb(Theme::TEXT_MUTED))
-                                            .child(format!("•  {}", detail_addr_str)),
-                                    ),
-                            ),
+                                    // Tombol Terapkan Saldo Kredit HANYA muncul jika pelanggan punya saldo kredit > 0
+                                    .when(has_credit, |d2| {
+                                        d2.child(
+                                            accent_action_button(
+                                                "Terapkan Saldo Kredit",
+                                                "F5",
+                                                Theme::BADGE_DEPOSIT_TEXT,
+                                                Theme::BADGE_DEPOSIT_BG,
+                                                Theme::BADGE_DEPOSIT_BORDER,
+                                            )
+                                            .id("tool-det-apply-credit")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_apply_deposit_modal_for_payment(None);
+                                                cx.notify();
+                                            })),
+                                        )
+                                    })
+                            }),
                     )
+                    // Right: Master Customer Actions (Ubah Data & Merge)
                     .child(
                         div()
                             .flex()
@@ -1332,205 +2387,365 @@ impl Desktop {
                             .gap(px(6.0))
                             .when(self.can_write(), |d| {
                                 d.child(
-                                    primary_action_button("+ Penjualan Kredit", "F3")
-                                        .id("btn-det-sale")
+                                    secondary_action_button("Ubah Data Pelanggan", "Ctrl+E")
+                                        .id("tool-det-edit-cust")
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.open_record_sale_modal();
+                                            this.open_edit_customer_modal();
                                             cx.notify();
                                         })),
                                 )
-                                .child(
-                                    secondary_action_button("+ Catat Pembayaran", "F4")
-                                        .id("btn-det-pay")
+                            })
+                            .when(self.is_owner(), |d| {
+                                d.child(
+                                    secondary_action_button("Gabungkan (Merge)", "Ctrl+M")
+                                        .id("tool-det-merge-cust")
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.open_record_payment_modal();
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    secondary_action_button("Terapkan Saldo", "F5")
-                                        .id("btn-det-deposit")
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.open_apply_deposit_modal();
+                                            this.open_merge_customer_modal();
                                             cx.notify();
                                         })),
                                 )
                             }),
                     ),
             )
-            // Kartu Ringkasan Saldo Pelanggan
+            // WORKSPACE BODY
             .child(
                 div()
+                    .flex_1()
                     .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(self.enterprise_kpi_card(
-                        "TOTAL PIUTANG TERUTANG",
-                        format!("Rp {}", format_idr(detail.total_outstanding_idr)),
-                        "Kewajiban tagihan belanja kredit berjalan",
-                        Theme::BADGE_DEBIT_TEXT,
-                        Theme::BADGE_DEBIT_BORDER,
-                    ))
-                    .child(self.enterprise_kpi_card(
-                        "SALDO KREDIT (DEPOSIT)",
-                        format!("Rp {}", format_idr(detail.customer_credit_idr)),
-                        "Kelebihan pembayaran yang dapat diterapkan ke transaksi",
-                        Theme::PRIMARY,
-                        Theme::PRIMARY_BORDER,
-                    )),
-            )
-            // Segmented Tab Selector Enterprise
-            .child(
-                div()
-                    .h(px(34.0))
-                    .flex()
-                    .items_center()
+                    .flex_col()
+                    .p(px(10.0))
                     .gap(px(8.0))
+                    .overflow_hidden()
+                    // Panel Identitas & Ringkasan Posisi Keuangan Pelanggan
                     .child(
                         div()
-                            .id("tab-btn-ledger")
-                            .h(px(32.0))
-                            .px(px(14.0))
-                            .bg(rgb(if self.customer_tab == CustomerTab::Ledger {
-                                Theme::PRIMARY_LIGHT
-                            } else {
-                                Theme::BG_CARD
-                            }))
+                            .bg(rgb(Theme::BG_CARD))
                             .border_1()
-                            .border_color(rgb(if self.customer_tab == CustomerTab::Ledger {
-                                Theme::PRIMARY_BORDER
-                            } else {
-                                Theme::BORDER_DEFAULT
-                            }))
-                            .rounded(px(4.0))
+                            .border_color(rgb(Theme::BORDER_STRONG))
+                            .rounded(px(3.0))
+                            .p(px(10.0))
                             .flex()
                             .items_center()
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.customer_tab = CustomerTab::Ledger;
-                                cx.notify();
-                            }))
+                            .justify_between()
+                            // Left: Customer Identity
                             .child(
                                 div()
-                                    .text_size(px(12.0))
-                                    .font_weight(if self.customer_tab == CustomerTab::Ledger {
-                                        FontWeight::BOLD
-                                    } else {
-                                        FontWeight::MEDIUM
-                                    })
-                                    .text_color(rgb(if self.customer_tab == CustomerTab::Ledger {
-                                        Theme::PRIMARY
-                                    } else {
-                                        Theme::TEXT_SECONDARY
-                                    }))
-                                    .child("Buku Piutang (Ledger Mutasi)"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("tab-btn-payments")
-                            .h(px(32.0))
-                            .px(px(14.0))
-                            .bg(rgb(if self.customer_tab == CustomerTab::Payments {
-                                Theme::PRIMARY_LIGHT
-                            } else {
-                                Theme::BG_CARD
-                            }))
-                            .border_1()
-                            .border_color(rgb(if self.customer_tab == CustomerTab::Payments {
-                                Theme::PRIMARY_BORDER
-                            } else {
-                                Theme::BORDER_DEFAULT
-                            }))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.customer_tab = CustomerTab::Payments;
-                                cx.notify();
-                            }))
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(4.0))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(15.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                                                    .child(detail.name),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px(px(6.0))
+                                                    .py(px(1.0))
+                                                    .rounded(px(2.0))
+                                                    .bg(rgb(Theme::PRIMARY_LIGHT))
+                                                    .border_1()
+                                                    .border_color(rgb(Theme::PRIMARY_BORDER))
+                                                    .text_size(px(10.5))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(Theme::PRIMARY))
+                                                    .child(code_str),
+                                            )
+                                            .child(
+                                                div()
+                                                    .px(px(6.0))
+                                                    .py(px(1.0))
+                                                    .rounded(px(2.0))
+                                                    .bg(rgb(if detail.is_active {
+                                                        Theme::BADGE_CREDIT_BG
+                                                    } else {
+                                                        0xF1F5F9
+                                                    }))
+                                                    .border_1()
+                                                    .border_color(rgb(if detail.is_active {
+                                                        Theme::BADGE_CREDIT_BORDER
+                                                    } else {
+                                                        Theme::BORDER_DEFAULT
+                                                    }))
+                                                    .text_size(px(10.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(if detail.is_active {
+                                                        Theme::BADGE_CREDIT_TEXT
+                                                    } else {
+                                                        Theme::TEXT_MUTED
+                                                    }))
+                                                    .child(if detail.is_active {
+                                                        "Aktif"
+                                                    } else {
+                                                        "Nonaktif"
+                                                    }),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.5))
+                                            .text_color(rgb(Theme::TEXT_MUTED))
+                                            .child(format!(
+                                                "{}  •  Versi Data: v{}",
+                                                addr_str, detail.version
+                                            )),
+                                    ),
+                            )
+                            // Right: Financial Highlights (Total Piutang, Saldo Kredit, Saldo Bersih Buku)
                             .child(
                                 div()
-                                    .text_size(px(12.0))
-                                    .font_weight(if self.customer_tab == CustomerTab::Payments {
-                                        FontWeight::BOLD
-                                    } else {
-                                        FontWeight::MEDIUM
-                                    })
-                                    .text_color(rgb(
-                                        if self.customer_tab == CustomerTab::Payments {
-                                            Theme::PRIMARY
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(10.0))
+                                    .child(self.detail_financial_badge(
+                                        "TOTAL PIUTANG TERUTANG",
+                                        format_rupiah(detail.outstanding_idr),
+                                        if is_lunas { "Lunas" } else { "Belum Lunas" },
+                                        if is_lunas {
+                                            Theme::BADGE_CREDIT_TEXT
                                         } else {
-                                            Theme::TEXT_SECONDARY
+                                            Theme::BADGE_DEBIT_TEXT
+                                        },
+                                        if is_lunas {
+                                            Theme::BADGE_CREDIT_BG
+                                        } else {
+                                            Theme::BADGE_DEBIT_BG
+                                        },
+                                        if is_lunas {
+                                            Theme::BADGE_CREDIT_BORDER
+                                        } else {
+                                            Theme::BADGE_DEBIT_BORDER
                                         },
                                     ))
-                                    .child("Riwayat Pembayaran"),
+                                    .child(self.detail_financial_badge(
+                                        "SALDO KREDIT (DEPOSIT)",
+                                        format_rupiah(detail.customer_credit_idr),
+                                        if has_credit {
+                                            "Ada Saldo Lebih"
+                                        } else {
+                                            "Tidak Ada Deposit"
+                                        },
+                                        if has_credit {
+                                            Theme::BADGE_DEPOSIT_TEXT
+                                        } else {
+                                            Theme::TEXT_MUTED
+                                        },
+                                        if has_credit {
+                                            Theme::BADGE_DEPOSIT_BG
+                                        } else {
+                                            0xF8FAFC
+                                        },
+                                        if has_credit {
+                                            Theme::BADGE_DEPOSIT_BORDER
+                                        } else {
+                                            Theme::BORDER_DEFAULT
+                                        },
+                                    ))
+                                    .child(self.detail_financial_badge(
+                                        "SALDO BERSIH BUKU PIUTANG",
+                                        format_accounting_rupiah(
+                                            ledger_page.summary.ledger_balance_idr,
+                                        ),
+                                        "Debet − Kredit",
+                                        if ledger_page.summary.ledger_balance_idr < 0 {
+                                            Theme::BADGE_DEBIT_TEXT
+                                        } else {
+                                            Theme::TEXT_PRIMARY
+                                        },
+                                        0xF8FAFC,
+                                        Theme::BORDER_STRONG,
+                                    )),
                             ),
-                    ),
+                    )
+                    // SUB-TAB BAR & CONTEXTUAL SUB-TAB CONTROLS
+                    .child(
+                        div()
+                            .h(px(32.0))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            // Left: Folder Tabs
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .child(
+                                        self.native_folder_tab(
+                                            "tab-btn-ledger",
+                                            format!(
+                                                "Buku Piutang (Ledger Mutasi) [{}]",
+                                                ledger_page.entries.len()
+                                            ),
+                                            self.customer_tab == CustomerTab::Ledger,
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.customer_tab = CustomerTab::Ledger;
+                                            cx.notify();
+                                        })),
+                                    )
+                                    .child(
+                                        self.native_folder_tab(
+                                            "tab-btn-payments",
+                                            format!(
+                                                "Riwayat Pembayaran & Alokasi FIFO [{}]",
+                                                payments.len()
+                                            ),
+                                            self.customer_tab == CustomerTab::Payments,
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.customer_tab = CustomerTab::Payments;
+                                            cx.notify();
+                                        })),
+                                    ),
+                            )
+                            // Right: Controls specific to the active sub-tab!
+                            .child(match self.customer_tab {
+                                CustomerTab::Ledger => div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .child(
+                                        secondary_action_button(
+                                            if has_date_filter {
+                                                "Filter Tanggal: Aktif"
+                                            } else {
+                                                "Filter Periode Tanggal..."
+                                            },
+                                            "",
+                                        )
+                                        .id("btn-ledger-date-filter")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.open_filter_ledger_date_modal();
+                                            cx.notify();
+                                        })),
+                                    )
+                                    .when(has_date_filter, |d| {
+                                        d.child(
+                                            secondary_action_button("Reset Tanggal", "")
+                                                .id("btn-ledger-date-reset")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.ledger_from = None;
+                                                    this.ledger_to = None;
+                                                    this.status_msg =
+                                                        "Filter tanggal buku piutang direset."
+                                                            .into();
+                                                    cx.notify();
+                                                })),
+                                        )
+                                    })
+                                    .child(tool_separator())
+                                    .child(
+                                        self.sort_toggle_button(
+                                            "btn-sort-desc",
+                                            "Terbaru di Atas",
+                                            self.ledger_sort_desc,
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.ledger_sort_desc = true;
+                                            cx.notify();
+                                        })),
+                                    )
+                                    .child(
+                                        self.sort_toggle_button(
+                                            "btn-sort-asc",
+                                            "Terlama di Atas (Kronologis)",
+                                            !self.ledger_sort_desc,
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.ledger_sort_desc = false;
+                                            cx.notify();
+                                        })),
+                                    ),
+                                CustomerTab::Payments => div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(Theme::TEXT_MUTED))
+                                            .child("Pembayaran otomatis melunasi piutang terlama (FIFO). Sisa menjadi Saldo Kredit."),
+                                    ),
+                            }),
+                    )
+                    // ACTIVE SUB-TAB DBGRID
+                    .child(match self.customer_tab {
+                        CustomerTab::Ledger => {
+                            self.render_ledger_grid(&ledger_page.entries, cx)
+                        }
+                        CustomerTab::Payments => self.render_payments_grid(&payments, cx),
+                    }),
             )
-            // Konten Tab
-            .child(match self.customer_tab {
-                CustomerTab::Ledger => self.render_ledger_grid(&ledger, cx),
-                CustomerTab::Payments => self.render_payments_grid(&payments),
-            })
     }
 
     fn render_ledger_grid(&self, ledger: &[LedgerEntry], cx: &mut Context<Self>) -> Div {
+        let is_owner = self.is_owner();
         let columns = vec![
             GridColumn {
                 title: "TANGGAL",
-                width_px: 95.0,
+                width_px: 92.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
                 title: "URAIAN TRANSAKSI",
-                width_px: 240.0,
+                width_px: 230.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "QTY",
-                width_px: 60.0,
+                title: "JUMLAH (QTY)",
+                width_px: 80.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "HARGA (RP)",
-                width_px: 95.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "DEBET (RP)",
-                width_px: 110.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "KREDIT (RP)",
-                width_px: 110.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "SALDO (RP)",
-                width_px: 120.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "STATUS",
-                width_px: 90.0,
-                align: ColumnAlign::Center,
-            },
-            GridColumn {
-                title: "SISA (RP)",
+                title: "HARGA SATUAN",
                 width_px: 105.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "UMUR",
-                width_px: 95.0,
+                title: "DEBET (RP)",
+                width_px: 115.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "KREDIT (RP)",
+                width_px: 115.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "SALDO (RP)",
+                width_px: 125.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "LUNAS",
+                width_px: 72.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "AKSI",
-                width_px: 80.0,
+                title: "SISA",
+                width_px: 105.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "UMUR PIUTANG",
+                width_px: 95.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: if is_owner {
+                    "KOREKSI (OWNER)"
+                } else {
+                    "STATUS"
+                },
+                width_px: 100.0,
                 align: ColumnAlign::Center,
             },
         ];
@@ -1539,9 +2754,8 @@ impl Desktop {
             .flex_1()
             .bg(rgb(Theme::BG_CARD))
             .border_1()
-            .border_color(rgb(Theme::BORDER_DEFAULT))
-            .rounded(px(6.0))
-            .shadow_sm()
+            .border_color(rgb(Theme::BORDER_STRONG))
+            .rounded(px(3.0))
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -1553,7 +2767,7 @@ impl Desktop {
                     .children(if ledger.is_empty() {
                         vec![
                             render_empty_state(
-                                "Belum ada mutasi buku piutang tercatat untuk pelanggan ini.",
+                                "Belum ada transaksi buku piutang pada periode yang dipilih.",
                             )
                             .into_any_element(),
                         ]
@@ -1562,120 +2776,194 @@ impl Desktop {
                             .iter()
                             .enumerate()
                             .map(|(idx, entry)| {
-                                let is_odd = idx % 2 == 1;
-                                let bg_color = if is_odd {
+                                let bg_color = if idx % 2 == 1 {
                                     Theme::BG_ROW_ALT
                                 } else {
                                     Theme::BG_CARD
                                 };
                                 let entry_id = entry.id.clone();
+                                let is_debit = entry.debit_idr > 0;
+                                let is_credit = entry.credit_idr > 0;
+                                let is_settled = entry.remaining_idr == 0;
                                 let is_rev = entry.is_reversed;
-                                let can_rev = self.can_write() && !is_rev;
+                                // FR-007: Reversal HANYA untuk Owner pada entry non-reversed dan bukan kontra-entry
+                                let can_rev = is_owner && !is_rev && entry.entry_type != "reversal";
 
-                                let desc_str = entry.description.clone();
+                                let date_str = entry
+                                    .effective_date
+                                    .map(|d| d.format("%d %b %Y").to_string())
+                                    .unwrap_or_else(|| "Tidak Diketahui".into());
+                                let desc_str = if is_rev {
+                                    format!("{} [DIBALIK]", entry.description)
+                                } else {
+                                    entry.description.clone()
+                                };
                                 let qty_str = entry.quantity.clone().unwrap_or_else(|| "—".into());
                                 let price_str = entry
                                     .unit_price_idr
-                                    .map(format_idr)
+                                    .map(format_rupiah)
                                     .unwrap_or_else(|| "—".into());
-                                let date_str = entry.effective_date.format("%d %b %Y").to_string();
+
+                                let age_str = if !is_debit || is_settled || is_rev {
+                                    "—".to_string()
+                                } else {
+                                    match entry.age_days {
+                                        None => "Tgl tidak diketahui".to_string(),
+                                        Some(d) if d < 0 => "Masa depan".to_string(),
+                                        Some(d) if d > 60 => "60 > Hari".to_string(),
+                                        Some(d) => format!("{} hari", d),
+                                    }
+                                };
 
                                 div()
                                     .id(("ledg-row", idx))
-                                    .h(px(32.0))
+                                    .h(px(28.0))
                                     .bg(rgb(bg_color))
                                     .border_b_1()
                                     .border_color(rgb(Theme::GRID_LINE))
                                     .flex()
                                     .items_center()
-                                    .child(grid_cell(date_str, 95.0, ColumnAlign::Center, false))
-                                    .child(grid_cell(desc_str, 240.0, ColumnAlign::Left, false))
-                                    .child(grid_cell(qty_str, 60.0, ColumnAlign::Right, false))
-                                    .child(grid_cell(price_str, 95.0, ColumnAlign::Right, false))
-                                    .child(grid_cell(
-                                        if entry.debit_idr > 0 {
-                                            format_idr(entry.debit_idr)
+                                    .child(grid_row_indicator(idx + 1, false))
+                                    .child(grid_cell(date_str, 92.0, ColumnAlign::Center, false))
+                                    .child(grid_cell_styled(
+                                        desc_str,
+                                        230.0,
+                                        ColumnAlign::Left,
+                                        if is_rev {
+                                            Theme::TEXT_LIGHT
+                                        } else {
+                                            Theme::TEXT_PRIMARY
+                                        },
+                                        FontWeight::MEDIUM,
+                                        None,
+                                    ))
+                                    .child(grid_cell(qty_str, 80.0, ColumnAlign::Right, false))
+                                    .child(grid_cell(price_str, 105.0, ColumnAlign::Right, false))
+                                    .child(grid_cell_styled(
+                                        if is_debit {
+                                            format_rupiah(entry.debit_idr)
                                         } else {
                                             "—".into()
                                         },
-                                        110.0,
+                                        115.0,
                                         ColumnAlign::Right,
-                                        false,
+                                        if is_debit {
+                                            Theme::BADGE_WARNING_TEXT
+                                        } else {
+                                            Theme::TEXT_LIGHT
+                                        },
+                                        if is_debit {
+                                            FontWeight::BOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        },
+                                        None,
                                     ))
-                                    .child(grid_cell(
-                                        if entry.credit_idr > 0 {
-                                            format_idr(entry.credit_idr)
+                                    .child(grid_cell_styled(
+                                        if is_credit {
+                                            format_rupiah(entry.credit_idr)
                                         } else {
                                             "—".into()
                                         },
-                                        110.0,
+                                        115.0,
                                         ColumnAlign::Right,
-                                        false,
+                                        if is_credit {
+                                            Theme::BADGE_CREDIT_TEXT
+                                        } else {
+                                            Theme::TEXT_LIGHT
+                                        },
+                                        if is_credit {
+                                            FontWeight::BOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        },
+                                        None,
                                     ))
-                                    .child(grid_cell(
-                                        format_idr(entry.running_balance_idr),
-                                        120.0,
+                                    // Saldo berjalan: format kurung akuntansi (Rp ...) merah jika negatif (FR-004)
+                                    .child(grid_cell_styled(
+                                        format_accounting_rupiah(entry.running_balance_idr),
+                                        125.0,
                                         ColumnAlign::Right,
-                                        false,
+                                        if entry.running_balance_idr < 0 {
+                                            Theme::BADGE_DEBIT_TEXT
+                                        } else {
+                                            Theme::TEXT_PRIMARY
+                                        },
+                                        FontWeight::BOLD,
+                                        if entry.running_balance_idr < 0 {
+                                            Some(Theme::BADGE_DEBIT_BG)
+                                        } else {
+                                            None
+                                        },
                                     ))
-                                    .child(match entry.allocation_status {
-                                        Some(AllocationStatus::Allocated) => grid_badge(
+                                    // Kolom Lunas (persis seperti Web & Excel Gambar 1)
+                                    .child(if !is_debit || is_rev {
+                                        grid_cell("—", 72.0, ColumnAlign::Center, false)
+                                    } else if is_settled {
+                                        grid_badge(
                                             "Lunas",
-                                            Theme::BADGE_CREDIT_TEXT,
-                                            Theme::BADGE_CREDIT_BG,
-                                            Theme::BADGE_CREDIT_BORDER,
-                                            90.0,
-                                        ),
-                                        Some(AllocationStatus::PartiallyAllocated) => grid_badge(
-                                            "Sebagian",
-                                            Theme::BADGE_WARNING_TEXT,
-                                            Theme::BADGE_WARNING_BG,
-                                            Theme::BADGE_WARNING_BORDER,
-                                            90.0,
-                                        ),
-                                        Some(AllocationStatus::Unallocated) => grid_badge(
+                                            Theme::BADGE_LUNAS_TEXT,
+                                            Theme::BADGE_LUNAS_BG,
+                                            Theme::BADGE_LUNAS_BORDER,
+                                            72.0,
+                                        )
+                                    } else {
+                                        grid_badge(
                                             "Belum",
                                             Theme::BADGE_DEBIT_TEXT,
                                             Theme::BADGE_DEBIT_BG,
                                             Theme::BADGE_DEBIT_BORDER,
-                                            90.0,
-                                        ),
-                                        None => grid_cell(
-                                            "—".to_string(),
-                                            90.0,
-                                            ColumnAlign::Center,
-                                            false,
-                                        ),
+                                            72.0,
+                                        )
                                     })
-                                    .child(grid_cell(
-                                        if entry.debit_idr > 0 {
-                                            format_idr(entry.remaining_idr)
-                                        } else {
+                                    // Kolom Sisa
+                                    .child(grid_cell_styled(
+                                        if !is_debit || is_settled || is_rev {
                                             "—".into()
+                                        } else {
+                                            format_rupiah(entry.remaining_idr)
                                         },
                                         105.0,
                                         ColumnAlign::Right,
-                                        false,
-                                    ))
-                                    .child(grid_cell(
-                                        match entry.age_days {
-                                            Some(d) if d > 60 => "> 60 Hari".to_string(),
-                                            Some(d) => match d {
-                                                0..=15 => "0-15 Hari".to_string(),
-                                                16..=30 => "16-30 Hari".to_string(),
-                                                31..=45 => "31-45 Hari".to_string(),
-                                                46..=60 => "46-60 Hari".to_string(),
-                                                _ => "> 60 Hari".to_string(),
-                                            },
-                                            None => "—".to_string(),
+                                        if !is_debit || is_settled || is_rev {
+                                            Theme::TEXT_LIGHT
+                                        } else {
+                                            Theme::BADGE_DEBIT_TEXT
                                         },
-                                        95.0,
-                                        ColumnAlign::Center,
-                                        false,
+                                        if !is_debit || is_settled || is_rev {
+                                            FontWeight::NORMAL
+                                        } else {
+                                            FontWeight::BOLD
+                                        },
+                                        None,
                                     ))
+                                    // Kolom Umur Piutang
+                                    .child(grid_cell_styled(
+                                        age_str,
+                                        95.0,
+                                        ColumnAlign::Right,
+                                        match entry.age_days {
+                                            Some(d) if d > 60 && !is_settled => {
+                                                Theme::BADGE_DEBIT_TEXT
+                                            }
+                                            Some(d) if d > 30 && !is_settled => {
+                                                Theme::BADGE_WARNING_TEXT
+                                            }
+                                            Some(d) if d < 0 && !is_settled => {
+                                                Theme::BADGE_EXCEPTION_TEXT
+                                            }
+                                            None if is_debit && !is_settled => {
+                                                Theme::BADGE_EXCEPTION_TEXT
+                                            }
+                                            _ => Theme::TEXT_MUTED,
+                                        },
+                                        FontWeight::SEMIBOLD,
+                                        None,
+                                    ))
+                                    // Kolom Aksi Koreksi (Owner Only sesuai FR-007)
                                     .child(
                                         div()
-                                            .w(px(80.0))
+                                            .w(px(100.0))
                                             .h_full()
                                             .flex()
                                             .items_center()
@@ -1685,13 +2973,15 @@ impl Desktop {
                                                     div()
                                                         .id(("rev-btn", idx))
                                                         .px(px(6.0))
-                                                        .py(px(2.0))
+                                                        .py(px(1.0))
                                                         .bg(rgb(Theme::BG_CARD))
                                                         .border_1()
-                                                        .border_color(rgb(0xFCA5A5))
-                                                        .rounded(px(3.0))
+                                                        .border_color(rgb(
+                                                            Theme::BADGE_DEBIT_BORDER,
+                                                        ))
+                                                        .rounded(px(2.0))
                                                         .cursor_pointer()
-                                                        .hover(|d| d.bg(rgb(0xFEE2E2)))
+                                                        .hover(|d| d.bg(rgb(Theme::BADGE_DEBIT_BG)))
                                                         .on_click(cx.listener(
                                                             move |this, _, _, cx| {
                                                                 this.open_reverse_modal(&entry_id);
@@ -1700,21 +2990,30 @@ impl Desktop {
                                                         ))
                                                         .child(
                                                             div()
-                                                                .text_size(px(10.5))
+                                                                .text_size(px(10.0))
                                                                 .font_weight(FontWeight::BOLD)
                                                                 .text_color(rgb(
                                                                     Theme::BADGE_DEBIT_TEXT,
                                                                 ))
-                                                                .child("Koreksi"),
+                                                                .child("Balik (Reverse)"),
                                                         ),
                                                 )
                                             })
                                             .when(is_rev, |d| {
                                                 d.child(
                                                     div()
-                                                        .text_size(px(10.5))
+                                                        .text_size(px(10.0))
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
+                                                        .child("Dibalik"),
+                                                )
+                                            })
+                                            .when(!can_rev && !is_rev, |d| {
+                                                d.child(
+                                                    div()
+                                                        .text_size(px(10.0))
                                                         .text_color(rgb(Theme::TEXT_LIGHT))
-                                                        .child("(Batal)"),
+                                                        .child("Posted"),
                                                 )
                                             }),
                                     )
@@ -1725,42 +3024,54 @@ impl Desktop {
             )
     }
 
-    fn render_payments_grid(&self, payments: &[PaymentRow]) -> Div {
+    fn render_payments_grid(&self, payments: &[PaymentRow], cx: &mut Context<Self>) -> Div {
+        let can_write = self.can_write();
+        let is_owner = self.is_owner();
         let columns = vec![
             GridColumn {
-                title: "TANGGAL TERIMA",
-                width_px: 120.0,
+                title: "TGL DITERIMA",
+                width_px: 95.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "METODE BAYAR",
-                width_px: 110.0,
-                align: ColumnAlign::Left,
+                title: "METODE",
+                width_px: 105.0,
+                align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "NOMOR REFERENSI",
-                width_px: 150.0,
+                title: "STATUS",
+                width_px: 75.0,
+                align: ColumnAlign::Center,
+            },
+            GridColumn {
+                title: "REFERENSI",
+                width_px: 125.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
                 title: "NOMINAL BAYAR",
-                width_px: 145.0,
+                width_px: 125.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "TERALOKASI",
+                title: "TERALOKASI (FIFO)",
+                width_px: 125.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "SALDO LEBIH (KREDIT)",
                 width_px: 140.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "SISA SALDO KREDIT",
-                width_px: 160.0,
-                align: ColumnAlign::Right,
+                title: "CATATAN & RINCIAN ALOKASI",
+                width_px: 230.0,
+                align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "CATATAN PEMBAYARAN",
-                width_px: 260.0,
-                align: ColumnAlign::Left,
+                title: "AKSI PEMBAYARAN",
+                width_px: 170.0,
+                align: ColumnAlign::Center,
             },
         ];
 
@@ -1768,9 +3079,8 @@ impl Desktop {
             .flex_1()
             .bg(rgb(Theme::BG_CARD))
             .border_1()
-            .border_color(rgb(Theme::BORDER_DEFAULT))
-            .rounded(px(6.0))
-            .shadow_sm()
+            .border_color(rgb(Theme::BORDER_STRONG))
+            .rounded(px(3.0))
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -1781,56 +3091,177 @@ impl Desktop {
                     .flex_1()
                     .children(if payments.is_empty() {
                         vec![
-                            render_empty_state("Belum ada riwayat pembayaran yang tercatat.")
-                                .into_any_element(),
+                            render_empty_state(
+                                "Belum ada riwayat pembayaran untuk pelanggan ini.",
+                            )
+                            .into_any_element(),
                         ]
                     } else {
                         payments
                             .iter()
                             .enumerate()
                             .map(|(idx, p)| {
-                                let is_odd = idx % 2 == 1;
-                                let bg_color = if is_odd {
+                                let bg_color = if idx % 2 == 1 {
                                     Theme::BG_ROW_ALT
                                 } else {
                                     Theme::BG_CARD
                                 };
-
                                 let date_str = p.received_date.format("%d %b %Y").to_string();
-                                let method_str = p.method.clone();
+                                let method_str = p.method_label().to_string();
                                 let ref_str = p.reference.clone().unwrap_or_else(|| "—".into());
-                                let note_str = p.note.clone().unwrap_or_else(|| "—".into());
+                                let alloc_summary = if p.allocations.is_empty() {
+                                    p.note.clone().unwrap_or_else(|| "Belum dialokasikan".into())
+                                } else {
+                                    let count = p.allocations.len();
+                                    match &p.note {
+                                        Some(n) => format!("{} ({} nota)", n, count),
+                                        None => format!("Dialokasikan ke {} nota debet", count),
+                                    }
+                                };
+                                let has_surplus = p.unallocated_credit_idr > 0;
+                                let is_posted = p.status == "posted";
+                                let pay_id_apply = p.id.clone();
+                                let pay_id_realloc = p.id.clone();
 
                                 div()
                                     .id(("pay-row", idx))
-                                    .h(px(32.0))
+                                    .h(px(28.0))
                                     .bg(rgb(bg_color))
                                     .border_b_1()
                                     .border_color(rgb(Theme::GRID_LINE))
                                     .flex()
                                     .items_center()
-                                    .child(grid_cell(date_str, 120.0, ColumnAlign::Center, false))
-                                    .child(grid_cell(method_str, 110.0, ColumnAlign::Left, false))
-                                    .child(grid_cell(ref_str, 150.0, ColumnAlign::Left, false))
+                                    .child(grid_row_indicator(idx + 1, false))
+                                    .child(grid_cell(date_str, 95.0, ColumnAlign::Center, false))
+                                    .child(grid_cell(method_str, 105.0, ColumnAlign::Center, false))
+                                    .child(if is_posted {
+                                        grid_badge(
+                                            "Posted",
+                                            Theme::BADGE_CREDIT_TEXT,
+                                            Theme::BADGE_CREDIT_BG,
+                                            Theme::BADGE_CREDIT_BORDER,
+                                            75.0,
+                                        )
+                                    } else {
+                                        grid_badge(
+                                            "Reversed",
+                                            Theme::BADGE_DEBIT_TEXT,
+                                            Theme::BADGE_DEBIT_BG,
+                                            Theme::BADGE_DEBIT_BORDER,
+                                            75.0,
+                                        )
+                                    })
+                                    .child(grid_cell(ref_str, 125.0, ColumnAlign::Left, false))
+                                    .child(grid_cell_styled(
+                                        format_rupiah(p.amount_idr),
+                                        125.0,
+                                        ColumnAlign::Right,
+                                        Theme::BADGE_CREDIT_TEXT,
+                                        FontWeight::BOLD,
+                                        None,
+                                    ))
                                     .child(grid_cell(
-                                        format_idr(p.amount_idr),
-                                        145.0,
+                                        format_rupiah(p.allocated_idr),
+                                        125.0,
                                         ColumnAlign::Right,
                                         false,
                                     ))
-                                    .child(grid_cell(
-                                        format_idr(p.allocated_idr),
+                                    .child(grid_cell_styled(
+                                        format_rupiah(p.unallocated_credit_idr),
                                         140.0,
                                         ColumnAlign::Right,
-                                        false,
+                                        if has_surplus {
+                                            Theme::BADGE_DEPOSIT_TEXT
+                                        } else {
+                                            Theme::TEXT_LIGHT
+                                        },
+                                        if has_surplus {
+                                            FontWeight::BOLD
+                                        } else {
+                                            FontWeight::NORMAL
+                                        },
+                                        if has_surplus {
+                                            Some(Theme::BADGE_DEPOSIT_BG)
+                                        } else {
+                                            None
+                                        },
                                     ))
                                     .child(grid_cell(
-                                        format_idr(p.unallocated_credit_idr),
-                                        160.0,
-                                        ColumnAlign::Right,
+                                        alloc_summary,
+                                        230.0,
+                                        ColumnAlign::Left,
                                         false,
                                     ))
-                                    .child(grid_cell(note_str, 260.0, ColumnAlign::Left, false))
+                                    .child(
+                                        div()
+                                            .w(px(170.0))
+                                            .h_full()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .gap(px(4.0))
+                                            .when(can_write && has_surplus && is_posted, |d| {
+                                                d.child(
+                                                    div()
+                                                        .id(("btn-pay-apply", idx))
+                                                        .px(px(6.0))
+                                                        .py(px(1.0))
+                                                        .bg(rgb(Theme::BADGE_DEPOSIT_BG))
+                                                        .border_1()
+                                                        .border_color(rgb(
+                                                            Theme::BADGE_DEPOSIT_BORDER,
+                                                        ))
+                                                        .rounded(px(2.0))
+                                                        .cursor_pointer()
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.open_apply_deposit_modal_for_payment(Some(pay_id_apply.clone()));
+                                                                cx.notify();
+                                                            },
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(10.0))
+                                                                .font_weight(FontWeight::BOLD)
+                                                                .text_color(rgb(
+                                                                    Theme::BADGE_DEPOSIT_TEXT,
+                                                                ))
+                                                                .child("Terapkan Kredit"),
+                                                        ),
+                                                )
+                                            })
+                                            .when(is_owner && is_posted, |d| {
+                                                d.child(
+                                                    div()
+                                                        .id(("btn-pay-realloc", idx))
+                                                        .px(px(6.0))
+                                                        .py(px(1.0))
+                                                        .bg(rgb(Theme::BG_CARD))
+                                                        .border_1()
+                                                        .border_color(rgb(Theme::BORDER_STRONG))
+                                                        .rounded(px(2.0))
+                                                        .cursor_pointer()
+                                                        .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.open_reallocate_payment_modal(
+                                                                    &pay_id_realloc,
+                                                                );
+                                                                cx.notify();
+                                                            },
+                                                        ))
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(10.0))
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(rgb(
+                                                                    Theme::TEXT_PRIMARY,
+                                                                ))
+                                                                .child("Realokasi"),
+                                                        ),
+                                                )
+                                            }),
+                                    )
                                     .into_any_element()
                             })
                             .collect()
@@ -1838,51 +3269,65 @@ impl Desktop {
             )
     }
 
+    // =========================================================================
+    // HALAMAN 3: LAPORAN ANALISIS UMUR PIUTANG (AgingReport - FR-005 / API-501..502)
+    // Toolbar kontekstual: HANYA kontrol tanggal acuan (as_of) & filter bucket aging
+    // =========================================================================
     fn render_aging_report_view(&self, cx: &mut Context<Self>) -> Div {
         let report = match self.store.get_aging_report(self.aging_as_of) {
             Ok(r) => r,
-            Err(_) => return div().child("Gagal memuat laporan aging."),
+            Err(e) => return div().p(px(16.0)).child(e.0),
         };
 
         let columns = vec![
             GridColumn {
                 title: "KODE",
-                width_px: 85.0,
+                width_px: 75.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
                 title: "NAMA PELANGGAN",
-                width_px: 240.0,
+                width_px: 210.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "TOTAL TERUTANG",
-                width_px: 150.0,
+                title: "TOTAL TERBUKA",
+                width_px: 130.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "0 - 15 HARI",
+                title: "0–15 HARI",
+                width_px: 105.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "16–30 HARI",
+                width_px: 105.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "31–45 HARI",
+                width_px: 105.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: "46–60 HARI",
+                width_px: 105.0,
+                align: ColumnAlign::Right,
+            },
+            GridColumn {
+                title: ">60 HARI",
                 width_px: 115.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "16 - 30 HARI",
-                width_px: 115.0,
+                title: "TGL TDK DIKETAHUI",
+                width_px: 120.0,
                 align: ColumnAlign::Right,
             },
             GridColumn {
-                title: "31 - 45 HARI",
+                title: "TGL MASA DEPAN",
                 width_px: 115.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "46 - 60 HARI",
-                width_px: 115.0,
-                align: ColumnAlign::Right,
-            },
-            GridColumn {
-                title: "> 60 HARI",
-                width_px: 125.0,
                 align: ColumnAlign::Right,
             },
         ];
@@ -1896,6 +3341,8 @@ impl Desktop {
                 Some(2) => c.days_31_45 > 0,
                 Some(3) => c.days_46_60 > 0,
                 Some(4) => c.days_over_60 > 0,
+                Some(5) => c.unknown_date > 0,
+                Some(6) => c.future_date > 0,
                 _ => true,
             })
             .collect();
@@ -1905,282 +3352,371 @@ impl Desktop {
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_APP))
-            .p(px(12.0))
-            .gap(px(10.0))
-            // Header Aging
+            .overflow_hidden()
+            // CONTEXTUAL COMMAND BAR: HANYA KONTROL LAPORAN AGING
             .child(
-                div()
-                    .h(px(42.0))
-                    .bg(rgb(Theme::BG_CARD))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(6.0))
-                    .shadow_sm()
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
+                render_toolbar_container()
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(8.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
-                                    .text_size(px(14.0))
+                                    .text_size(px(12.5))
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child("Laporan Analisis Umur Piutang (Aging Buckets)"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .text_color(rgb(Theme::TEXT_MUTED))
                                     .child(format!(
-                                        "•  Acuan: {}",
-                                        report.as_of.format("%d %B %Y")
+                                        "Laporan Umur Piutang (Per Tanggal Acuan: {})",
+                                        report.as_of.format("%Y-%m-%d")
                                     )),
-                            ),
+                            )
+                            .child(tool_separator())
+                            .child(
+                                primary_action_button("Ubah Tanggal Acuan (As Of)...", "")
+                                    .id("tool-aging-date")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_change_as_of_modal();
+                                        cx.notify();
+                                    })),
+                            )
+                            .when(self.aging_as_of != self.today_jakarta(), |d| {
+                                d.child(
+                                    secondary_action_button("Reset ke Hari Ini", "")
+                                        .id("tool-aging-reset-date")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.aging_as_of = this.today_jakarta();
+                                            this.status_msg =
+                                                "Tanggal acuan laporan aging dikembalikan ke hari ini."
+                                                    .into();
+                                            cx.notify();
+                                        })),
+                                )
+                            }),
                     )
                     .child(
-                        secondary_action_button("Ubah Tanggal Acuan...", "")
-                            .id("btn-change-aging-date")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_change_as_of_modal();
-                                cx.notify();
-                            })),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .when(self.aging_selected_bucket.is_some(), |d| {
+                                d.child(
+                                    secondary_action_button("Tampilkan Semua Kelompok Umur", "")
+                                        .id("tool-aging-clear-bucket")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.aging_selected_bucket = None;
+                                            cx.notify();
+                                        })),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(Theme::TEXT_MUTED))
+                                    .child("Klik kartu umur di bawah untuk memfilter rincian pelanggan"),
+                            ),
                     ),
             )
-            // Bucket Cards Enterprise
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.enterprise_aging_card(
-                        "aging-c-all",
-                        "TOTAL TERBUKA",
-                        format!("Rp {}", format_idr(report.total_open_idr)),
-                        self.aging_selected_bucket.is_none(),
-                        Theme::TEXT_PRIMARY,
-                        0x0F172A,
-                        cx,
-                        None,
-                    ))
-                    .child(self.enterprise_aging_card(
-                        "aging-c-0",
-                        "0 - 15 HARI (LANCAR)",
-                        format!("Rp {}", format_idr(report.days_0_15)),
-                        self.aging_selected_bucket == Some(0),
-                        Theme::BADGE_CREDIT_TEXT,
-                        Theme::BADGE_CREDIT_BORDER,
-                        cx,
-                        Some(0),
-                    ))
-                    .child(self.enterprise_aging_card(
-                        "aging-c-1",
-                        "16 - 30 HARI",
-                        format!("Rp {}", format_idr(report.days_16_30)),
-                        self.aging_selected_bucket == Some(1),
-                        Theme::BADGE_WARNING_TEXT,
-                        Theme::BADGE_WARNING_BORDER,
-                        cx,
-                        Some(1),
-                    ))
-                    .child(self.enterprise_aging_card(
-                        "aging-c-2",
-                        "31 - 45 HARI",
-                        format!("Rp {}", format_idr(report.days_31_45)),
-                        self.aging_selected_bucket == Some(2),
-                        Theme::BADGE_WARNING_TEXT,
-                        Theme::BADGE_WARNING_BORDER,
-                        cx,
-                        Some(2),
-                    ))
-                    .child(self.enterprise_aging_card(
-                        "aging-c-3",
-                        "46 - 60 HARI",
-                        format!("Rp {}", format_idr(report.days_46_60)),
-                        self.aging_selected_bucket == Some(3),
-                        Theme::BADGE_DEBIT_TEXT,
-                        Theme::BADGE_DEBIT_BORDER,
-                        cx,
-                        Some(3),
-                    ))
-                    .child(self.enterprise_aging_card(
-                        "aging-c-4",
-                        "> 60 HARI (MENUNGGAK)",
-                        format!("Rp {}", format_idr(report.days_over_60)),
-                        self.aging_selected_bucket == Some(4),
-                        Theme::BADGE_CRITICAL_TEXT,
-                        Theme::BADGE_CRITICAL_BORDER,
-                        cx,
-                        Some(4),
-                    )),
-            )
-            // DBGrid Drill-down
+            // WORKSPACE BODY
             .child(
                 div()
                     .flex_1()
-                    .bg(rgb(Theme::BG_CARD))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(6.0))
-                    .shadow_sm()
                     .flex()
                     .flex_col()
+                    .p(px(10.0))
+                    .gap(px(8.0))
                     .overflow_hidden()
-                    .child(render_grid_header(&columns))
-                    .child(div().id("aging-drill-scroll").flex_1().children(
-                        if filtered_customers.is_empty() {
-                            vec![
-                                render_empty_state(
-                                    "Tidak ada piutang terbuka pada kategori bucket umur ini.",
-                                )
-                                .into_any_element(),
-                            ]
-                        } else {
-                            filtered_customers
-                                .into_iter()
-                                .enumerate()
-                                .map(|(idx, c)| {
-                                    let is_odd = idx % 2 == 1;
-                                    let bg_color = if is_odd {
-                                        Theme::BG_ROW_ALT
+                    // 7 Bucket Cards (Semua + 5 Bucket Kalender + 2 Exception sesuai API-501)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-all",
+                                "TOTAL PIUTANG TERBUKA",
+                                "Seluruh bucket + pengecualian",
+                                format_rupiah(report.total_open_idr),
+                                self.aging_selected_bucket.is_none(),
+                                Theme::TEXT_PRIMARY,
+                                Theme::PRIMARY,
+                                None,
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-0",
+                                "0–15 HARI",
+                                "Piutang baru (lancar)",
+                                format_rupiah(report.days_0_15),
+                                self.aging_selected_bucket == Some(0),
+                                Theme::BADGE_CREDIT_TEXT,
+                                Theme::BADGE_CREDIT_BORDER,
+                                Some(0),
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-1",
+                                "16–30 HARI",
+                                "Jatuh tempo normal",
+                                format_rupiah(report.days_16_30),
+                                self.aging_selected_bucket == Some(1),
+                                Theme::BADGE_WARNING_TEXT,
+                                Theme::BADGE_WARNING_BORDER,
+                                Some(1),
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-2",
+                                "31–45 HARI",
+                                "Mulai tertunda",
+                                format_rupiah(report.days_31_45),
+                                self.aging_selected_bucket == Some(2),
+                                Theme::BADGE_WARNING_TEXT,
+                                Theme::BADGE_WARNING_BORDER,
+                                Some(2),
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-3",
+                                "46–60 HARI",
+                                "Perhatian khusus",
+                                format_rupiah(report.days_46_60),
+                                self.aging_selected_bucket == Some(3),
+                                Theme::BADGE_DEBIT_TEXT,
+                                Theme::BADGE_DEBIT_BORDER,
+                                Some(3),
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-4",
+                                "> 60 HARI",
+                                "Kritis / macet",
+                                format_rupiah(report.days_over_60),
+                                self.aging_selected_bucket == Some(4),
+                                Theme::BADGE_CRITICAL_TEXT,
+                                Theme::BADGE_CRITICAL_BORDER,
+                                Some(4),
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-5",
+                                "TGL TIDAK DIKETAHUI",
+                                "Historis tanpa tanggal",
+                                format_rupiah(report.unknown_date),
+                                self.aging_selected_bucket == Some(5),
+                                Theme::BADGE_EXCEPTION_TEXT,
+                                Theme::BADGE_EXCEPTION_BORDER,
+                                Some(5),
+                                cx,
+                            ))
+                            .child(self.native_aging_bucket_card(
+                                "ag-b-6",
+                                "TGL MASA DEPAN",
+                                "Setelah tanggal acuan",
+                                format_rupiah(report.future_date),
+                                self.aging_selected_bucket == Some(6),
+                                Theme::BADGE_EXCEPTION_TEXT,
+                                Theme::BADGE_EXCEPTION_BORDER,
+                                Some(6),
+                                cx,
+                            )),
+                    )
+                    // DBGrid Drill-Down
+                    .child(
+                        div()
+                            .flex_1()
+                            .bg(rgb(Theme::BG_CARD))
+                            .border_1()
+                            .border_color(rgb(Theme::BORDER_STRONG))
+                            .rounded(px(3.0))
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .child(render_grid_header(&columns))
+                            .child(
+                                div()
+                                    .id("aging-drill-scroll")
+                                    .flex_1()
+                                    .children(if filtered_customers.is_empty() {
+                                        vec![
+                                            render_empty_state(
+                                                "Tidak ada piutang terbuka pada kelompok umur ini.",
+                                            )
+                                            .into_any_element(),
+                                        ]
                                     } else {
-                                        Theme::BG_CARD
-                                    };
-                                    let cid = c.customer_id.clone();
-                                    let cname = c.customer_name.clone();
-                                    let code_str = c.customer_code.unwrap_or_else(|| "—".into());
+                                        filtered_customers
+                                            .into_iter()
+                                            .enumerate()
+                                            .map(|(idx, c)| {
+                                                let bg_color = if idx % 2 == 1 {
+                                                    Theme::BG_ROW_ALT
+                                                } else {
+                                                    Theme::BG_CARD
+                                                };
+                                                let cid = c.customer_id.clone();
+                                                let cname = c.customer_name.clone();
+                                                let code_str =
+                                                    c.customer_code.unwrap_or_else(|| "—".into());
 
-                                    div()
-                                        .id(("ag-row", idx))
-                                        .h(px(32.0))
-                                        .bg(rgb(bg_color))
-                                        .border_b_1()
-                                        .border_color(rgb(Theme::GRID_LINE))
-                                        .flex()
-                                        .items_center()
-                                        .cursor_pointer()
-                                        .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.selected_customer_id = Some(cid.clone());
-                                            this.current_view = CurrentView::CustomerDetail;
-                                            this.status_msg = format!(
-                                                "Membuka buku piutang pelanggan {}.",
-                                                cname
-                                            );
-                                            cx.notify();
-                                        }))
-                                        .child(grid_cell(
-                                            code_str,
-                                            85.0,
-                                            ColumnAlign::Center,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            c.customer_name,
-                                            240.0,
-                                            ColumnAlign::Left,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            format_idr(c.total_outstanding_idr),
-                                            150.0,
-                                            ColumnAlign::Right,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            if c.days_0_15 > 0 {
-                                                format_idr(c.days_0_15)
-                                            } else {
-                                                "—".into()
-                                            },
-                                            115.0,
-                                            ColumnAlign::Right,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            if c.days_16_30 > 0 {
-                                                format_idr(c.days_16_30)
-                                            } else {
-                                                "—".into()
-                                            },
-                                            115.0,
-                                            ColumnAlign::Right,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            if c.days_31_45 > 0 {
-                                                format_idr(c.days_31_45)
-                                            } else {
-                                                "—".into()
-                                            },
-                                            115.0,
-                                            ColumnAlign::Right,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            if c.days_46_60 > 0 {
-                                                format_idr(c.days_46_60)
-                                            } else {
-                                                "—".into()
-                                            },
-                                            115.0,
-                                            ColumnAlign::Right,
-                                            false,
-                                        ))
-                                        .child(grid_cell(
-                                            if c.days_over_60 > 0 {
-                                                format_idr(c.days_over_60)
-                                            } else {
-                                                "—".into()
-                                            },
-                                            125.0,
-                                            ColumnAlign::Right,
-                                            false,
-                                        ))
-                                        .into_any_element()
-                                })
-                                .collect()
-                        },
-                    )),
+                                                div()
+                                                    .id(("ag-row", idx))
+                                                    .h(px(28.0))
+                                                    .bg(rgb(bg_color))
+                                                    .border_b_1()
+                                                    .border_color(rgb(Theme::GRID_LINE))
+                                                    .flex()
+                                                    .items_center()
+                                                    .cursor_pointer()
+                                                    .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.selected_customer_id =
+                                                                Some(cid.clone());
+                                                            this.current_view =
+                                                                CurrentView::CustomerDetail;
+                                                            this.status_msg = format!(
+                                                                "Membuka buku piutang pelanggan '{}'.",
+                                                                cname
+                                                            );
+                                                            cx.notify();
+                                                        },
+                                                    ))
+                                                    .child(grid_row_indicator(idx + 1, false))
+                                                    .child(grid_cell(
+                                                        code_str,
+                                                        75.0,
+                                                        ColumnAlign::Center,
+                                                        false,
+                                                    ))
+                                                    .child(grid_cell_styled(
+                                                        c.customer_name,
+                                                        210.0,
+                                                        ColumnAlign::Left,
+                                                        Theme::TEXT_PRIMARY,
+                                                        FontWeight::BOLD,
+                                                        None,
+                                                    ))
+                                                    .child(grid_cell_styled(
+                                                        format_rupiah(c.total_outstanding_idr),
+                                                        130.0,
+                                                        ColumnAlign::Right,
+                                                        Theme::TEXT_PRIMARY,
+                                                        FontWeight::BOLD,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.days_0_15,
+                                                        105.0,
+                                                        Theme::TEXT_PRIMARY,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.days_16_30,
+                                                        105.0,
+                                                        Theme::TEXT_PRIMARY,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.days_31_45,
+                                                        105.0,
+                                                        Theme::BADGE_WARNING_TEXT,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.days_46_60,
+                                                        105.0,
+                                                        Theme::BADGE_WARNING_TEXT,
+                                                        None,
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.days_over_60,
+                                                        115.0,
+                                                        Theme::BADGE_DEBIT_TEXT,
+                                                        if c.days_over_60 > 0 {
+                                                            Some(Theme::BADGE_DEBIT_BG)
+                                                        } else {
+                                                            None
+                                                        },
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.unknown_date,
+                                                        120.0,
+                                                        Theme::BADGE_EXCEPTION_TEXT,
+                                                        if c.unknown_date > 0 {
+                                                            Some(Theme::BADGE_EXCEPTION_BG)
+                                                        } else {
+                                                            None
+                                                        },
+                                                    ))
+                                                    .child(self.aging_amount_cell(
+                                                        c.future_date,
+                                                        115.0,
+                                                        Theme::BADGE_EXCEPTION_TEXT,
+                                                        if c.future_date > 0 {
+                                                            Some(Theme::BADGE_EXCEPTION_BG)
+                                                        } else {
+                                                            None
+                                                        },
+                                                    ))
+                                                    .into_any_element()
+                                            })
+                                            .collect()
+                                    }),
+                            ),
+                    ),
             )
     }
 
+    // =========================================================================
+    // HALAMAN 4: MANAJEMEN AKUN & OTORISASI PENGGUNA (Owner Only - FR-007)
+    // Toolbar kontekstual: HANYA tombol tambah pengguna & kebijakan keamanan
+    // =========================================================================
     fn render_user_management_view(&self, cx: &mut Context<Self>) -> Div {
         let users = self.store.list_users().unwrap_or_default();
+        let current_uid = self
+            .session
+            .as_ref()
+            .map(|s| s.id.clone())
+            .unwrap_or_default();
+
+        let total_users = users.len();
+        let total_owners = users.iter().filter(|u| u.role == UserRole::Owner).count();
+        let total_operators = users
+            .iter()
+            .filter(|u| u.role == UserRole::Operator)
+            .count();
+        let total_active = users.iter().filter(|u| u.is_active).count();
+
         let columns = vec![
             GridColumn {
                 title: "USERNAME",
-                width_px: 130.0,
+                width_px: 185.0,
                 align: ColumnAlign::Left,
             },
             GridColumn {
-                title: "NAMA LENGKAP",
-                width_px: 240.0,
-                align: ColumnAlign::Left,
-            },
-            GridColumn {
-                title: "PERAN / OTORISASI",
-                width_px: 140.0,
+                title: "PERAN (ROLE)",
+                width_px: 155.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
                 title: "STATUS AKUN",
-                width_px: 110.0,
+                width_px: 115.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
                 title: "KEWAJIBAN SANDI",
-                width_px: 140.0,
+                width_px: 150.0,
                 align: ColumnAlign::Center,
             },
             GridColumn {
-                title: "AKSI KELOLA",
-                width_px: 180.0,
+                title: "TANGGAL DIBUAT",
+                width_px: 135.0,
+                align: ColumnAlign::Center,
+            },
+            GridColumn {
+                title: "AKSI KELOLA AKUN",
+                width_px: 260.0,
                 align: ColumnAlign::Center,
             },
         ];
@@ -2190,175 +3726,371 @@ impl Desktop {
             .flex()
             .flex_col()
             .h_full()
-            .bg(rgb(Theme::BG_APP))
-            .p(px(12.0))
-            .gap(px(10.0))
+            .overflow_hidden()
+            // CONTEXTUAL COMMAND BAR: HANYA AKSI MANAJEMEN PENGGUNA
+            .child(
+                render_toolbar_container()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.5))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                                    .child("Manajemen Akun & Otorisasi Pengguna (Owner Only)"),
+                            )
+                            .child(tool_separator())
+                            .child(
+                                primary_action_button("+ Tambah Pengguna Baru", "")
+                                    .id("tool-user-add")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_new_user_modal();
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(Theme::TEXT_MUTED))
+                            .child("Kebijakan: Kata Sandi Sementara Min. 15 Karakter • Minimal 1 Owner Aktif"),
+                    ),
+            )
+            // WORKSPACE BODY
             .child(
                 div()
-                    .h(px(42.0))
-                    .bg(rgb(Theme::BG_CARD))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(6.0))
-                    .shadow_sm()
-                    .px(px(12.0))
+                    .flex_1()
                     .flex()
-                    .items_center()
-                    .justify_between()
+                    .flex_col()
+                    .p(px(10.0))
+                    .gap(px(8.0))
+                    .overflow_hidden()
+                    // 4 KPI Boxes matching Web UserManagementPage
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(14.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                    .child("Manajemen Akun & Otorisasi Pengguna (Owner Only)"),
-                            ),
+                            .child(self.native_summary_box(
+                                "TOTAL PENGGUNA",
+                                format!("{} Akun", total_users),
+                                "Terdaftar dalam sistem toko",
+                                Theme::TEXT_PRIMARY,
+                                Theme::BORDER_STRONG,
+                            ))
+                            .child(self.native_summary_box(
+                                "PERAN PEMILIK (OWNER)",
+                                format!("{} Akun", total_owners),
+                                "Hak akses administratif penuh",
+                                Theme::PRIMARY,
+                                Theme::PRIMARY_BORDER,
+                            ))
+                            .child(self.native_summary_box(
+                                "OPERATOR KASIR",
+                                format!("{} Akun", total_operators),
+                                "Penjualan kredit & pencatatan bayar",
+                                Theme::TEXT_PRIMARY,
+                                Theme::BORDER_STRONG,
+                            ))
+                            .child(self.native_summary_box(
+                                "STATUS KEAKTIFAN",
+                                format!("{} Aktif", total_active),
+                                "Akun yang memiliki izin masuk",
+                                Theme::BADGE_CREDIT_TEXT,
+                                Theme::BADGE_CREDIT_BORDER,
+                            )),
                     )
-                    .child(
-                        primary_action_button("+ Tambah Pengguna Baru", "")
-                            .id("btn-add-user-mgr")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_new_user_modal();
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .bg(rgb(Theme::BG_CARD))
-                    .border_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(6.0))
-                    .shadow_sm()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .child(render_grid_header(&columns))
+                    // DBGrid Users
                     .child(
                         div()
-                            .id("user-mgr-scroll")
                             .flex_1()
-                            .children(users.into_iter().enumerate().map(|(idx, u)| {
-                                let is_odd = idx % 2 == 1;
-                                let bg_color = if is_odd { Theme::BG_ROW_ALT } else { Theme::BG_CARD };
-                                let uid = u.id.clone();
-                                let uid_toggle = u.id.clone();
-                                let is_act = u.active;
-                                let username_str = u.username.clone();
+                            .bg(rgb(Theme::BG_CARD))
+                            .border_1()
+                            .border_color(rgb(Theme::BORDER_STRONG))
+                            .rounded(px(3.0))
+                            .flex()
+                            .flex_col()
+                            .overflow_hidden()
+                            .child(render_grid_header(&columns))
+                            .child(
+                                div().id("user-mgr-scroll").flex_1().children(
+                                    users
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(|(idx, u)| {
+                                            let bg_color = if idx % 2 == 1 {
+                                                Theme::BG_ROW_ALT
+                                            } else {
+                                                Theme::BG_CARD
+                                            };
+                                            let is_self = u.id == current_uid;
+                                            let u_edit = u.clone();
+                                            let u_reset = u.clone();
+                                            let u_toggle = u.clone();
+                                            let uname_label = if is_self {
+                                                format!("{} (Akun Anda)", u.username)
+                                            } else {
+                                                u.username.clone()
+                                            };
+                                            let date_str =
+                                                u.created_at.format("%d %b %Y").to_string();
 
-                                div()
-                                    .id(("u-row", idx))
-                                    .h(px(32.0))
-                                    .bg(rgb(bg_color))
-                                    .border_b_1()
-                                    .border_color(rgb(Theme::GRID_LINE))
-                                    .flex()
-                                    .items_center()
-                                    .child(grid_cell(u.username, 130.0, ColumnAlign::Left, false))
-                                    .child(grid_cell(u.full_name.clone(), 240.0, ColumnAlign::Left, false))
-                                    .child(match u.role {
-                                        UserRole::Owner => grid_badge("OWNER", 0x1E40AF, 0xDBEAFE, 0x93C5FD, 140.0),
-                                        UserRole::Operator => grid_badge("OPERATOR", Theme::PRIMARY, Theme::PRIMARY_LIGHT, Theme::PRIMARY_BORDER, 140.0),
-                                        UserRole::Viewer => grid_badge("VIEWER", Theme::TEXT_MUTED, 0xF1F5F9, 0xE2E8F0, 140.0),
-                                    })
-                                    .child(if u.active {
-                                        grid_badge("Aktif", Theme::BADGE_CREDIT_TEXT, Theme::BADGE_CREDIT_BG, Theme::BADGE_CREDIT_BORDER, 110.0)
-                                    } else {
-                                        grid_badge("Nonaktif", Theme::TEXT_MUTED, 0xF1F5F9, 0xE2E8F0, 110.0)
-                                    })
-                                    .child(grid_cell(if u.must_change_password { "Wajib Ganti" } else { "Terverifikasi" }, 140.0, ColumnAlign::Center, false))
-                                    .child(
-                                        div()
-                                            .w(px(180.0))
-                                            .h_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .gap(px(6.0))
-                                            .child(
-                                                div()
-                                                    .id(("rst-btn", idx))
-                                                    .px(px(8.0))
-                                                    .py(px(2.0))
-                                                    .bg(rgb(Theme::BG_CARD))
-                                                    .border_1()
-                                                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                                                    .rounded(px(3.0))
-                                                    .cursor_pointer()
-                                                    .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        match this.store.reset_password(&uid) {
-                                                            Ok(pw) => {
-                                                                this.active_modal = Some(ActiveModal::Notice {
-                                                                    title: "Reset Kata Sandi Sukses",
-                                                                    message: format!("Kata sandi sementara baru: {}", pw),
-                                                                });
-                                                            }
-                                                            Err(e) => {
-                                                                this.status_msg = e.0;
-                                                            }
-                                                        }
-                                                        cx.notify();
-                                                    }))
-                                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::MEDIUM).text_color(rgb(Theme::TEXT_PRIMARY)).child("Reset Sandi")),
-                                            )
-                                            .child(
-                                                div()
-                                                    .id(("tgl-btn", idx))
-                                                    .px(px(8.0))
-                                                    .py(px(2.0))
-                                                    .bg(rgb(Theme::BG_CARD))
-                                                    .border_1()
-                                                    .border_color(rgb(if is_act { Theme::BADGE_DEBIT_BORDER } else { Theme::BADGE_CREDIT_BORDER }))
-                                                    .rounded(px(3.0))
-                                                    .cursor_pointer()
-                                                    .hover(|d| d.bg(rgb(if is_act { Theme::BADGE_DEBIT_BG } else { Theme::BADGE_CREDIT_BG })))
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        let up = UpdateUserInput {
-                                                            full_name: u.full_name.clone(),
-                                                            role: u.role,
-                                                            active: !is_act,
-                                                        };
-                                                        if let Err(e) = this.store.update_user(&uid_toggle, &up) {
-                                                            this.status_msg = e.0;
-                                                        } else {
-                                                            this.status_msg = format!("Status akun {} telah diubah.", username_str);
-                                                        }
-                                                        cx.notify();
-                                                    }))
-                                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(if is_act { Theme::BADGE_DEBIT_TEXT } else { Theme::BADGE_CREDIT_TEXT })).child(if is_act { "Nonaktifkan" } else { "Aktifkan" })),
-                                            ),
-                                    )
-                                    .into_any_element()
-                            }).collect::<Vec<_>>()),
+                                            div()
+                                                .id(("u-row", idx))
+                                                .h(px(28.0))
+                                                .bg(rgb(bg_color))
+                                                .border_b_1()
+                                                .border_color(rgb(Theme::GRID_LINE))
+                                                .flex()
+                                                .items_center()
+                                                .child(grid_row_indicator(idx + 1, is_self))
+                                                .child(grid_cell_styled(
+                                                    uname_label,
+                                                    185.0,
+                                                    ColumnAlign::Left,
+                                                    Theme::TEXT_PRIMARY,
+                                                    FontWeight::BOLD,
+                                                    None,
+                                                ))
+                                                .child(match u.role {
+                                                    UserRole::Owner => grid_badge(
+                                                        "Pemilik (Owner)",
+                                                        Theme::BADGE_CREDIT_TEXT,
+                                                        Theme::BADGE_CREDIT_BG,
+                                                        Theme::BADGE_CREDIT_BORDER,
+                                                        155.0,
+                                                    ),
+                                                    UserRole::Operator => grid_badge(
+                                                        "Operator Kasir",
+                                                        Theme::PRIMARY,
+                                                        Theme::PRIMARY_LIGHT,
+                                                        Theme::PRIMARY_BORDER,
+                                                        155.0,
+                                                    ),
+                                                    UserRole::Viewer => grid_badge(
+                                                        "Pembaca (Viewer)",
+                                                        Theme::TEXT_MUTED,
+                                                        0xF1F5F9,
+                                                        0xCBD5E1,
+                                                        155.0,
+                                                    ),
+                                                })
+                                                .child(if u.is_active {
+                                                    grid_badge(
+                                                        "Aktif",
+                                                        Theme::BADGE_CREDIT_TEXT,
+                                                        Theme::BADGE_CREDIT_BG,
+                                                        Theme::BADGE_CREDIT_BORDER,
+                                                        115.0,
+                                                    )
+                                                } else {
+                                                    grid_badge(
+                                                        "Nonaktif",
+                                                        Theme::TEXT_MUTED,
+                                                        0xF1F5F9,
+                                                        0xCBD5E1,
+                                                        115.0,
+                                                    )
+                                                })
+                                                .child(if u.must_change_password {
+                                                    grid_badge(
+                                                        "Wajib Ganti Sandi",
+                                                        Theme::BADGE_WARNING_TEXT,
+                                                        Theme::BADGE_WARNING_BG,
+                                                        Theme::BADGE_WARNING_BORDER,
+                                                        150.0,
+                                                    )
+                                                } else {
+                                                    grid_cell(
+                                                        "Terverifikasi",
+                                                        150.0,
+                                                        ColumnAlign::Center,
+                                                        false,
+                                                    )
+                                                })
+                                                .child(grid_cell(
+                                                    date_str,
+                                                    135.0,
+                                                    ColumnAlign::Center,
+                                                    false,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .w(px(260.0))
+                                                        .h_full()
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .gap(px(5.0))
+                                                        .child(
+                                                            div()
+                                                                .id(("edit-u-btn", idx))
+                                                                .px(px(7.0))
+                                                                .py(px(1.0))
+                                                                .bg(rgb(Theme::BG_CARD))
+                                                                .border_1()
+                                                                .border_color(rgb(
+                                                                    Theme::BORDER_STRONG,
+                                                                ))
+                                                                .rounded(px(2.0))
+                                                                .cursor_pointer()
+                                                                .hover(|d| {
+                                                                    d.bg(rgb(Theme::BG_ROW_HOVER))
+                                                                })
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        this.open_edit_user_modal(
+                                                                            &u_edit,
+                                                                        );
+                                                                        cx.notify();
+                                                                    },
+                                                                ))
+                                                                .child(
+                                                                    div()
+                                                                        .text_size(px(10.0))
+                                                                        .font_weight(
+                                                                            FontWeight::SEMIBOLD,
+                                                                        )
+                                                                        .text_color(rgb(
+                                                                            Theme::TEXT_PRIMARY,
+                                                                        ))
+                                                                        .child("Ubah"),
+                                                                ),
+                                                        )
+                                                        .when(!is_self && u.is_active, |d| {
+                                                            d.child(
+                                                                div()
+                                                                    .id(("rst-u-btn", idx))
+                                                                    .px(px(7.0))
+                                                                    .py(px(1.0))
+                                                                    .bg(rgb(
+                                                                        Theme::BADGE_WARNING_BG,
+                                                                    ))
+                                                                    .border_1()
+                                                                    .border_color(rgb(
+                                                                        Theme::BADGE_WARNING_BORDER,
+                                                                    ))
+                                                                    .rounded(px(2.0))
+                                                                    .cursor_pointer()
+                                                                    .on_click(cx.listener(
+                                                                        move |this, _, _, cx| {
+                                                                            this.open_reset_user_password_modal(&u_reset);
+                                                                            cx.notify();
+                                                                        },
+                                                                    ))
+                                                                    .child(
+                                                                        div()
+                                                                            .text_size(px(10.0))
+                                                                            .font_weight(
+                                                                                FontWeight::BOLD,
+                                                                            )
+                                                                            .text_color(rgb(
+                                                                                Theme::BADGE_WARNING_TEXT,
+                                                                            ))
+                                                                            .child("Reset Sandi"),
+                                                                    ),
+                                                            )
+                                                        })
+                                                        .when(!is_self, |d| {
+                                                            let is_act = u.is_active;
+                                                            d.child(
+                                                                div()
+                                                                    .id(("tgl-u-btn", idx))
+                                                                    .px(px(7.0))
+                                                                    .py(px(1.0))
+                                                                    .bg(rgb(if is_act {
+                                                                        Theme::BADGE_DEBIT_BG
+                                                                    } else {
+                                                                        Theme::BADGE_CREDIT_BG
+                                                                    }))
+                                                                    .border_1()
+                                                                    .border_color(rgb(if is_act {
+                                                                        Theme::BADGE_DEBIT_BORDER
+                                                                    } else {
+                                                                        Theme::BADGE_CREDIT_BORDER
+                                                                    }))
+                                                                    .rounded(px(2.0))
+                                                                    .cursor_pointer()
+                                                                    .on_click(cx.listener(
+                                                                        move |this, _, _, cx| {
+                                                                            let up =
+                                                                                UpdateUserInput {
+                                                                                    username: u_toggle.username.clone(),
+                                                                                    role: u_toggle.role,
+                                                                                    is_active: !u_toggle.is_active,
+                                                                                };
+                                                                            match this.store.update_user(&u_toggle.id, &up) {
+                                                                                Ok(updated) => {
+                                                                                    this.status_msg = format!(
+                                                                                        "Status akun '{}' diubah menjadi {}.",
+                                                                                        updated.username,
+                                                                                        if updated.is_active { "Aktif" } else { "Nonaktif" }
+                                                                                    );
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    this.status_msg = e.0;
+                                                                                }
+                                                                            }
+                                                                            cx.notify();
+                                                                        },
+                                                                    ))
+                                                                    .child(
+                                                                        div()
+                                                                            .text_size(px(10.0))
+                                                                            .font_weight(
+                                                                                FontWeight::BOLD,
+                                                                            )
+                                                                            .text_color(rgb(
+                                                                                if is_act {
+                                                                                    Theme::BADGE_DEBIT_TEXT
+                                                                                } else {
+                                                                                    Theme::BADGE_CREDIT_TEXT
+                                                                                },
+                                                                            ))
+                                                                            .child(if is_act {
+                                                                                "Nonaktifkan"
+                                                                            } else {
+                                                                                "Aktifkan"
+                                                                            }),
+                                                                    ),
+                                                            )
+                                                        }),
+                                                )
+                                                .into_any_element()
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
+                            ),
                     ),
             )
     }
 
-    fn enterprise_kpi_card(
+    // =========================================================================
+    // Helper Visual Native
+    // =========================================================================
+
+    fn native_summary_box(
         &self,
         title: &'static str,
         value: String,
         subtitle: &'static str,
         color_hex: u32,
-        border_hex: u32,
+        border_left_hex: u32,
     ) -> Div {
         div()
             .flex_1()
-            .h(px(64.0))
+            .h(px(58.0))
             .bg(rgb(Theme::BG_CARD))
             .border_1()
-            .border_color(rgb(Theme::BORDER_DEFAULT))
+            .border_color(rgb(Theme::BORDER_STRONG))
             .border_l_4()
-            .border_color(rgb(border_hex))
-            .p(px(10.0))
-            .rounded(px(6.0))
-            .shadow_sm()
+            .border_color(rgb(border_left_hex))
+            .px(px(10.0))
+            .py(px(6.0))
+            .rounded(px(3.0))
             .flex()
             .flex_col()
             .justify_between()
@@ -2369,14 +4101,14 @@ impl Desktop {
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(10.5))
+                            .text_size(px(10.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(Theme::TEXT_MUTED))
                             .child(title),
                     )
                     .child(
                         div()
-                            .text_size(px(15.5))
+                            .text_size(px(14.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(color_hex))
                             .child(value),
@@ -2384,30 +4116,160 @@ impl Desktop {
             )
             .child(
                 div()
-                    .text_size(px(10.5))
+                    .text_size(px(10.0))
                     .text_color(rgb(Theme::TEXT_LIGHT))
                     .child(subtitle),
             )
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn enterprise_aging_card(
+    fn detail_financial_badge(
+        &self,
+        label: &'static str,
+        amount_str: String,
+        status_label: &'static str,
+        text_hex: u32,
+        bg_hex: u32,
+        border_hex: u32,
+    ) -> Div {
+        div()
+            .px(px(10.0))
+            .py(px(5.0))
+            .bg(rgb(bg_hex))
+            .border_1()
+            .border_color(rgb(border_hex))
+            .rounded(px(3.0))
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(9.5))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(Theme::TEXT_MUTED))
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(9.5))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(text_hex))
+                            .child(status_label),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(px(14.0))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(text_hex))
+                    .child(amount_str),
+            )
+    }
+
+    fn native_folder_tab(
+        &self,
+        id: &'static str,
+        label: String,
+        is_active: bool,
+    ) -> gpui::Stateful<Div> {
+        div()
+            .id(id)
+            .h(px(28.0))
+            .px(px(12.0))
+            .bg(rgb(if is_active {
+                Theme::BG_CARD
+            } else {
+                Theme::BG_SIDEBAR
+            }))
+            .border_1()
+            .border_color(rgb(if is_active {
+                Theme::PRIMARY
+            } else {
+                Theme::BORDER_STRONG
+            }))
+            .border_t_2()
+            .rounded(px(3.0))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .child(
+                div()
+                    .text_size(px(11.5))
+                    .font_weight(if is_active {
+                        FontWeight::BOLD
+                    } else {
+                        FontWeight::MEDIUM
+                    })
+                    .text_color(rgb(if is_active {
+                        Theme::PRIMARY_HOVER
+                    } else {
+                        Theme::TEXT_SECONDARY
+                    }))
+                    .child(label),
+            )
+    }
+
+    fn sort_toggle_button(
         &self,
         id: &'static str,
         label: &'static str,
+        is_active: bool,
+    ) -> gpui::Stateful<Div> {
+        div()
+            .id(id)
+            .h(px(25.0))
+            .px(px(9.0))
+            .bg(rgb(if is_active {
+                Theme::PRIMARY
+            } else {
+                Theme::BG_CARD
+            }))
+            .border_1()
+            .border_color(rgb(if is_active {
+                Theme::PRIMARY_HOVER
+            } else {
+                Theme::BORDER_STRONG
+            }))
+            .rounded(px(3.0))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .child(
+                div()
+                    .text_size(px(10.5))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(if is_active {
+                        0xFFFFFF
+                    } else {
+                        Theme::TEXT_SECONDARY
+                    }))
+                    .child(label),
+            )
+    }
+
+    fn native_aging_bucket_card(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        desc: &'static str,
         amount: String,
         is_active: bool,
         color_hex: u32,
         border_hex: u32,
-        cx: &mut Context<Self>,
         bucket: Option<usize>,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         div()
             .id(id)
             .flex_1()
-            .h(px(56.0))
+            .h(px(62.0))
             .bg(rgb(if is_active {
-                Theme::PRIMARY_LIGHT
+                Theme::BG_ROW_SELECTED
             } else {
                 Theme::BG_CARD
             }))
@@ -2415,13 +4277,11 @@ impl Desktop {
             .border_color(rgb(if is_active {
                 Theme::PRIMARY
             } else {
-                Theme::BORDER_DEFAULT
+                border_hex
             }))
             .border_t_2()
-            .border_color(rgb(border_hex))
-            .p(px(8.0))
-            .rounded(px(5.0))
-            .shadow_sm()
+            .p(px(7.0))
+            .rounded(px(3.0))
             .flex()
             .flex_col()
             .justify_between()
@@ -2433,35 +4293,49 @@ impl Desktop {
             }))
             .child(
                 div()
-                    .text_size(px(10.0))
+                    .text_size(px(9.5))
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgb(Theme::TEXT_MUTED))
                     .child(label),
             )
             .child(
                 div()
-                    .text_size(px(13.5))
+                    .text_size(px(12.5))
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgb(color_hex))
                     .child(amount),
             )
+            .child(
+                div()
+                    .text_size(px(9.5))
+                    .text_color(rgb(Theme::TEXT_LIGHT))
+                    .child(desc),
+            )
     }
 
+    // =========================================================================
+    // Modal Dialogs Overlay
+    // =========================================================================
     fn render_modal_overlay(&self, cx: &mut Context<Self>) -> Option<Div> {
         let modal = self.active_modal.as_ref()?;
 
         match modal {
             ActiveModal::Notice { title, message } => {
-                let msg = message.clone();
                 let dialog = ModalDialog::new(title, 420.0);
                 let body = div()
-                    .p(px(12.0))
-                    .text_size(px(12.5))
-                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                    .child(msg)
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .text_color(rgb(Theme::TEXT_PRIMARY))
+                            .child(message.clone()),
+                    )
                     .into_any_element();
+
                 let footer = div()
-                    .h(px(46.0))
+                    .h(px(42.0))
                     .bg(rgb(Theme::BG_HEADER))
                     .border_t_1()
                     .border_color(rgb(Theme::BORDER_DEFAULT))
@@ -2470,242 +4344,354 @@ impl Desktop {
                     .items_center()
                     .justify_end()
                     .child(
-                        div()
+                        primary_action_button("Tutup (Enter / Esc)", "")
                             .id("btn-notice-ok")
-                            .h(px(28.0))
-                            .px(px(16.0))
-                            .bg(rgb(Theme::PRIMARY))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::PRIMARY_HOVER)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.active_modal = None;
                                 cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xFFFFFF))
-                                    .child("OK (Enter)"),
-                            ),
+                            })),
                     );
                 Some(dialog.frame(body, footer))
             }
-            ActiveModal::RecordSale => {
-                let cid = self.selected_customer_id.as_deref().unwrap_or_default();
-                let cust = self.store.get_customer(cid).ok()?;
-                let deposit_avail = cust.customer_credit_idr;
 
-                let mut total_sales: i64 = 0;
-                for (desc, qty, pr) in &self.sale_items {
-                    if !desc.trim().is_empty() {
-                        let q = toko_money::quantity_milli(qty).unwrap_or(0);
-                        let p = toko_money::rupiah(pr).unwrap_or(0);
-                        if let Some(sub) = toko_money::line_total(q, p) {
-                            total_sales += sub;
-                        }
+            ActiveModal::RecordSale => {
+                let cust_name = self
+                    .selected_customer_id
+                    .as_ref()
+                    .and_then(|id| self.store.get_customer(id).ok())
+                    .map(|c| c.name)
+                    .unwrap_or_else(|| "Pelanggan".into());
+
+                let dialog = ModalDialog::new("Catat Belanja Kredit / Piutang Baru", 740.0)
+                    .subtitle(cust_name);
+
+                let mut grand_total = 0_i64;
+                for (_, qty_str, price_str) in &self.sale_items {
+                    let clean_p: String =
+                        price_str.chars().filter(|c| c.is_ascii_digit()).collect();
+                    let p: i64 = clean_p.parse().unwrap_or(0);
+                    if let Ok(line) = compute_line_total_half_up(qty_str, p) {
+                        grand_total += line;
                     }
                 }
 
-                let dialog = ModalDialog::new("Faktur Penjualan Kredit (Multi-Item)", 640.0);
-                let date_val = self
-                    .form_fields
-                    .first()
-                    .map(|f| f.1.clone())
-                    .unwrap_or_default();
-                let reason_val = self
-                    .form_fields
-                    .get(1)
-                    .map(|f| f.1.clone())
-                    .unwrap_or_default();
-                let cust_code_str = cust.code.unwrap_or_else(|| "—".into());
+                let active_pos = self.sale_active_field;
+                let item_count = self.sale_items.len();
 
                 let body = div()
                     .flex()
                     .flex_col()
-                    .gap(px(12.0))
-                    // Header Informasi Pelanggan
+                    .gap(px(10.0))
+                    // Header Form: Tanggal, Referensi, & Backdate Reason
                     .child(
                         div()
-                            .p(px(10.0))
-                            .bg(rgb(Theme::BG_APP))
-                            .border_1()
-                            .border_color(rgb(Theme::BORDER_DEFAULT))
-                            .rounded(px(5.0))
                             .flex()
                             .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .child(div().text_size(px(12.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(cust.name))
-                                    .child(div().px(px(6.0)).py(px(1.0)).rounded(px(3.0)).bg(rgb(Theme::PRIMARY_LIGHT)).text_size(px(10.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::PRIMARY)).child(cust_code_str)),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(Theme::PRIMARY))
-                                    .child(format!("Saldo Deposit: Rp {}", format_idr(deposit_avail))),
-                            ),
+                            .gap(px(8.0))
+                            .children(self.form_fields.iter().enumerate().map(
+                                |(f_idx, (label, val))| {
+                                    let is_focused = active_pos == (item_count, f_idx);
+                                    div()
+                                        .id(("sale-hdr-f", f_idx))
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(3.0))
+                                        .cursor_pointer()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.sale_active_field =
+                                                (this.sale_items.len(), f_idx);
+                                            cx.notify();
+                                        }))
+                                        .child(
+                                            div()
+                                                .text_size(px(10.0))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(rgb(Theme::TEXT_SECONDARY))
+                                                .child(*label),
+                                        )
+                                        .child(
+                                            div()
+                                                .h(px(28.0))
+                                                .px(px(8.0))
+                                                .bg(rgb(0xFFFFFF))
+                                                .border_1()
+                                                .border_color(rgb(if is_focused {
+                                                    Theme::PRIMARY
+                                                } else {
+                                                    Theme::BORDER_STRONG
+                                                }))
+                                                .rounded(px(3.0))
+                                                .flex()
+                                                .items_center()
+                                                .text_size(px(11.5))
+                                                .text_color(rgb(Theme::TEXT_PRIMARY))
+                                                .child(if val.is_empty() {
+                                                    "—".to_string()
+                                                } else {
+                                                    val.clone()
+                                                }),
+                                        )
+                                },
+                            )),
                     )
-                    // Input Tanggal & Alasan
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(10.0))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(3.0))
-                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_MUTED)).child("TANGGAL TRANSAKSI (YYYY-MM-DD):"))
-                                    .child(div().h(px(28.0)).bg(rgb(0xFFFFFF)).border_1().border_color(rgb(Theme::BORDER_STRONG)).rounded(px(4.0)).px(px(8.0)).flex().items_center().text_size(px(12.0)).child(date_val)),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(3.0))
-                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_MUTED)).child("ALASAN TANGGAL LAMPAU:"))
-                                    .child(div().h(px(28.0)).bg(rgb(0xFFFFFF)).border_1().border_color(rgb(Theme::BORDER_STRONG)).rounded(px(4.0)).px(px(8.0)).flex().items_center().text_size(px(12.0)).child(if reason_val.is_empty() { "Alasan tanggal lampau (jika masa lalu)...".into() } else { reason_val })),
-                            ),
-                    )
-                    // Invoice Grid Baris Barang
+                    // Tabel Faktur Multi-Item
                     .child(
                         div()
                             .border_1()
-                            .border_color(rgb(Theme::BORDER_DEFAULT))
-                            .rounded(px(5.0))
-                            .bg(rgb(Theme::BG_CARD))
+                            .border_color(rgb(Theme::BORDER_STRONG))
+                            .rounded(px(3.0))
+                            .overflow_hidden()
                             .flex()
                             .flex_col()
-                            .overflow_hidden()
                             .child(
                                 div()
-                                    .h(px(28.0))
+                                    .h(px(26.0))
                                     .bg(rgb(Theme::BG_HEADER))
                                     .border_b_1()
-                                    .border_color(rgb(Theme::BORDER_DEFAULT))
+                                    .border_color(rgb(Theme::BORDER_STRONG))
+                                    .px(px(8.0))
                                     .flex()
                                     .items_center()
-                                    .text_size(px(11.0))
+                                    .text_size(px(10.5))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(Theme::TEXT_MUTED))
-                                    .child(div().w(px(250.0)).px(px(8.0)).child("URAIAN / NAMA BARANG"))
-                                    .child(div().w(px(70.0)).px(px(8.0)).text_right().child("QTY"))
-                                    .child(div().w(px(110.0)).px(px(8.0)).text_right().child("HARGA (RP)"))
-                                    .child(div().w(px(120.0)).px(px(8.0)).text_right().child("SUBTOTAL (RP)"))
-                                    .child(div().w(px(50.0)).child("")),
-                            )
-                            .children(self.sale_items.iter().enumerate().map(|(idx, (desc, qty, pr))| {
-                                let q = toko_money::quantity_milli(qty).unwrap_or(0);
-                                let p = toko_money::rupiah(pr).unwrap_or(0);
-                                let sub = toko_money::line_total(q, p).unwrap_or(0);
-                                let is_active_row = self.sale_active_field.0 == idx;
-
-                                let desc_display = if desc.is_empty() { "Ketik nama barang...".to_string() } else { desc.clone() };
-                                let qty_display = if qty.is_empty() { "1".to_string() } else { qty.clone() };
-                                let price_display = if pr.is_empty() { "0".to_string() } else { format_idr(p) };
-
-                                div()
-                                    .id(("sale-edit-row", idx))
-                                    .h(px(30.0))
-                                    .border_b_1()
-                                    .border_color(rgb(Theme::GRID_LINE))
-                                    .bg(rgb(if is_active_row { Theme::PRIMARY_LIGHT } else { 0xFFFFFF }))
-                                    .flex()
-                                    .items_center()
-                                    .text_size(px(12.0))
-                                    .child(div().w(px(250.0)).px(px(8.0)).font_weight(FontWeight::MEDIUM).child(desc_display))
-                                    .child(div().w(px(70.0)).px(px(8.0)).text_right().child(qty_display))
-                                    .child(div().w(px(110.0)).px(px(8.0)).text_right().child(price_display))
-                                    .child(div().w(px(120.0)).px(px(8.0)).text_right().font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(format_idr(sub)))
+                                    .text_color(rgb(Theme::TEXT_SECONDARY))
+                                    .child(div().w(px(32.0)).child("NO"))
+                                    .child(div().w(px(260.0)).child("NAMA BARANG / URAIAN"))
                                     .child(
                                         div()
-                                            .w(px(50.0))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .when(self.sale_items.len() > 1, |d| {
-                                                d.child(
+                                            .w(px(95.0))
+                                            .text_right()
+                                            .pr(px(8.0))
+                                            .child("QTY (MAKS 3 DES)"),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(130.0))
+                                            .text_right()
+                                            .pr(px(8.0))
+                                            .child("HARGA SATUAN (RP)"),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(130.0))
+                                            .text_right()
+                                            .pr(px(8.0))
+                                            .child("SUBTOTAL (HALF-UP)"),
+                                    )
+                                    .child(div().w(px(45.0)).text_center().child("HAPUS")),
+                            )
+                            .children(self.sale_items.iter().enumerate().map(
+                                |(r_idx, (desc, qty, price))| {
+                                    let clean_p: String =
+                                        price.chars().filter(|c| c.is_ascii_digit()).collect();
+                                    let p_num: i64 = clean_p.parse().unwrap_or(0);
+                                    let subtotal =
+                                        compute_line_total_half_up(qty, p_num).unwrap_or(0);
+
+                                    let f_desc = active_pos == (r_idx, 0);
+                                    let f_qty = active_pos == (r_idx, 1);
+                                    let f_price = active_pos == (r_idx, 2);
+
+                                    div()
+                                        .h(px(32.0))
+                                        .px(px(8.0))
+                                        .bg(rgb(if r_idx % 2 == 1 {
+                                            Theme::BG_ROW_ALT
+                                        } else {
+                                            0xFFFFFF
+                                        }))
+                                        .border_b_1()
+                                        .border_color(rgb(Theme::GRID_LINE))
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .w(px(32.0))
+                                                .text_size(px(11.0))
+                                                .text_color(rgb(Theme::TEXT_MUTED))
+                                                .child(format!("{}", r_idx + 1)),
+                                        )
+                                        // Kolom Uraian
+                                        .child(
+                                            div()
+                                                .id(("s-desc", r_idx))
+                                                .w(px(252.0))
+                                                .mr(px(8.0))
+                                                .h(px(24.0))
+                                                .px(px(6.0))
+                                                .bg(rgb(0xFFFFFF))
+                                                .border_1()
+                                                .border_color(rgb(if f_desc {
+                                                    Theme::PRIMARY
+                                                } else {
+                                                    Theme::BORDER_STRONG
+                                                }))
+                                                .rounded(px(2.0))
+                                                .flex()
+                                                .items_center()
+                                                .cursor_pointer()
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.sale_active_field = (r_idx, 0);
+                                                    cx.notify();
+                                                }))
+                                                .text_size(px(11.5))
+                                                .text_color(rgb(if desc.is_empty() {
+                                                    Theme::TEXT_LIGHT
+                                                } else {
+                                                    Theme::TEXT_PRIMARY
+                                                }))
+                                                .child(if desc.is_empty() {
+                                                    "Ketik nama barang...".to_string()
+                                                } else {
+                                                    desc.clone()
+                                                }),
+                                        )
+                                        // Kolom Qty
+                                        .child(
+                                            div()
+                                                .id(("s-qty", r_idx))
+                                                .w(px(87.0))
+                                                .mr(px(8.0))
+                                                .h(px(24.0))
+                                                .px(px(6.0))
+                                                .bg(rgb(0xFFFFFF))
+                                                .border_1()
+                                                .border_color(rgb(if f_qty {
+                                                    Theme::PRIMARY
+                                                } else {
+                                                    Theme::BORDER_STRONG
+                                                }))
+                                                .rounded(px(2.0))
+                                                .flex()
+                                                .items_center()
+                                                .justify_end()
+                                                .cursor_pointer()
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.sale_active_field = (r_idx, 1);
+                                                    cx.notify();
+                                                }))
+                                                .text_size(px(11.5))
+                                                .text_color(rgb(Theme::TEXT_PRIMARY))
+                                                .child(qty.clone()),
+                                        )
+                                        // Kolom Harga Satuan
+                                        .child(
+                                            div()
+                                                .id(("s-price", r_idx))
+                                                .w(px(122.0))
+                                                .mr(px(8.0))
+                                                .h(px(24.0))
+                                                .px(px(6.0))
+                                                .bg(rgb(0xFFFFFF))
+                                                .border_1()
+                                                .border_color(rgb(if f_price {
+                                                    Theme::PRIMARY
+                                                } else {
+                                                    Theme::BORDER_STRONG
+                                                }))
+                                                .rounded(px(2.0))
+                                                .flex()
+                                                .items_center()
+                                                .justify_end()
+                                                .cursor_pointer()
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.sale_active_field = (r_idx, 2);
+                                                    cx.notify();
+                                                }))
+                                                .text_size(px(11.5))
+                                                .text_color(rgb(if price.is_empty() {
+                                                    Theme::TEXT_LIGHT
+                                                } else {
+                                                    Theme::TEXT_PRIMARY
+                                                }))
+                                                .child(if price.is_empty() {
+                                                    "0".to_string()
+                                                } else {
+                                                    format_idr(p_num)
+                                                }),
+                                        )
+                                        // Subtotal
+                                        .child(
+                                            div()
+                                                .w(px(130.0))
+                                                .pr(px(8.0))
+                                                .text_right()
+                                                .text_size(px(11.5))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(rgb(Theme::TEXT_PRIMARY))
+                                                .child(format_rupiah(subtotal)),
+                                        )
+                                        // Tombol Hapus Baris
+                                        .child(
+                                            div()
+                                                .id(("s-del", r_idx))
+                                                .w(px(45.0))
+                                                .flex()
+                                                .justify_center()
+                                                .cursor_pointer()
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    if this.sale_items.len() > 1 {
+                                                        this.sale_items.remove(r_idx);
+                                                        this.sale_active_field = (0, 0);
+                                                        cx.notify();
+                                                    }
+                                                }))
+                                                .child(
                                                     div()
-                                                        .id(("del-sale-line", idx))
-                                                        .cursor_pointer()
-                                                        .text_size(px(10.5))
+                                                        .text_size(px(11.0))
                                                         .font_weight(FontWeight::BOLD)
                                                         .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
-                                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                                            this.sale_items.remove(idx);
-                                                            cx.notify();
-                                                        }))
-                                                        .child("Hapus"),
-                                                )
-                                            }),
+                                                        .child("✕"),
+                                                ),
+                                        )
+                                },
+                            ))
+                            // Footer Tabel: Tambah Baris + Total
+                            .child(
+                                div()
+                                    .h(px(34.0))
+                                    .bg(rgb(Theme::BG_HEADER))
+                                    .px(px(8.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        secondary_action_button("+ Tambah Baris Barang Lagi", "")
+                                            .id("btn-sale-add-row")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                let next_idx = this.sale_items.len();
+                                                this.sale_items.push((
+                                                    "".into(),
+                                                    "1".into(),
+                                                    "".into(),
+                                                ));
+                                                this.sale_active_field = (next_idx, 0);
+                                                cx.notify();
+                                            })),
                                     )
-                            })),
-                    )
-                    // Footer Kalkulasi Subtotal & Tambah Baris
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .id("btn-add-sale-row")
-                                    .h(px(26.0))
-                                    .px(px(10.0))
-                                    .bg(rgb(Theme::BG_APP))
-                                    .border_1()
-                                    .border_color(rgb(Theme::BORDER_STRONG))
-                                    .rounded(px(4.0))
-                                    .flex()
-                                    .items_center()
-                                    .cursor_pointer()
-                                    .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.sale_items.push(("".into(), "1".into(), "".into()));
-                                        this.sale_active_field = (this.sale_items.len() - 1, 0);
-                                        cx.notify();
-                                    }))
-                                    .child(div().text_size(px(11.0)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::PRIMARY)).child("+ Tambah Baris Item")),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(div().text_size(px(11.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_MUTED)).child("TOTAL PENJUALAN:"))
-                                    .child(div().text_size(px(14.5)).font_weight(FontWeight::BOLD).text_color(rgb(Theme::TEXT_PRIMARY)).child(format!("Rp {}", format_idr(total_sales)))),
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(11.5))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(Theme::TEXT_SECONDARY))
+                                                    .child("TOTAL SELURUH BELANJA:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(14.5))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
+                                                    .child(format_rupiah(grand_total)),
+                                            ),
+                                    ),
                             ),
                     )
-                    // Banner Deteksi Auto-Apply Saldo Deposit
-                    .when(deposit_avail > 0 && total_sales > 0, |d| {
-                        let auto_app = total_sales.min(deposit_avail);
-                        d.child(
-                            div()
-                                .p(px(8.0))
-                                .bg(rgb(Theme::BADGE_DEPOSIT_BG))
-                                .border_1()
-                                .border_color(rgb(Theme::BADGE_DEPOSIT_BORDER))
-                                .rounded(px(5.0))
-                                .text_size(px(11.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(rgb(Theme::PRIMARY))
-                                .child(format!(
-                                    "✓ Deteksi Saldo: Deposit pelanggan sebesar Rp {} akan otomatis dialokasikan melunasi nota ini seketika saat disimpan.",
-                                    format_idr(auto_app)
-                                )),
-                        )
-                    })
                     .when(!self.form_error.is_empty(), |d| {
                         d.child(
                             div()
@@ -2713,128 +4699,133 @@ impl Desktop {
                                 .bg(rgb(Theme::BADGE_DEBIT_BG))
                                 .border_1()
                                 .border_color(rgb(Theme::BADGE_DEBIT_BORDER))
-                                .rounded(px(5.0))
+                                .rounded(px(3.0))
                                 .text_size(px(11.5))
-                                .font_weight(FontWeight::MEDIUM)
+                                .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
                                 .child(self.form_error.clone()),
                         )
                     })
+                    .child(
+                        div()
+                            .text_size(px(10.5))
+                            .text_color(rgb(Theme::TEXT_MUTED))
+                            .child("Catatan BR-006: Saldo kredit pelanggan tidak dipotong otomatis pada penjualan baru. Gunakan tombol 'Terapkan Saldo Kredit' untuk mengalokasikan deposit."),
+                    )
                     .into_any_element();
 
-                let footer = div()
-                    .h(px(46.0))
-                    .bg(rgb(Theme::BG_HEADER))
-                    .border_t_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .px(px(14.0))
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .id("btn-sale-modal-cancel")
-                            .h(px(28.0))
-                            .px(px(14.0))
-                            .bg(rgb(Theme::BG_CARD))
-                            .border_1()
-                            .border_color(rgb(Theme::BORDER_DEFAULT))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.active_modal = None;
-                                cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(Theme::TEXT_SECONDARY))
-                                    .child("Batal (Esc)"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("btn-sale-modal-save")
-                            .h(px(28.0))
-                            .px(px(16.0))
-                            .bg(rgb(Theme::PRIMARY))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::PRIMARY_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_modal(cx);
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xFFFFFF))
-                                    .child("Simpan Penjualan Kredit (Enter)"),
-                            ),
-                    );
-
+                let footer =
+                    self.render_modal_footer("Simpan & Posting ke Buku Piutang (Enter)", cx);
                 Some(dialog.frame(body, footer))
             }
+
             _ => {
-                // Modal form umum (Login, Pelanggan Baru, Pembayaran, Terapkan Saldo, Tambah Pengguna, dll.)
-                let title = match modal {
-                    ActiveModal::Login => "Masuk / Ganti Operator Sistem",
-                    ActiveModal::ChangePassword => "Perbarui Kata Sandi Akun",
-                    ActiveModal::NewCustomer => "Pendaftaran Pelanggan Baru",
-                    ActiveModal::EditCustomer(_) => "Perbarui Data Pelanggan",
-                    ActiveModal::RecordPayment => "Catat Pembayaran Piutang (Alokasi FIFO)",
-                    ActiveModal::ApplyDeposit => "Terapkan Saldo Kredit Pelanggan (Deposit)",
-                    ActiveModal::ReverseTransaction { .. } => {
-                        "Koreksi / Pembatalan Mutasi Buku Piutang"
+                let (title, submit_label, width) = match modal {
+                    ActiveModal::Login => {
+                        ("Masuk Sesi Pengguna (Login)", "Masuk Sesi (Enter)", 440.0)
                     }
-                    ActiveModal::NewUser => "Registrasi Pengguna Baru (Owner Only)",
-                    ActiveModal::ChangeAsOfDate => "Konfigurasi Tanggal Acuan Laporan Aging",
-                    _ => "Formulir Transaksi",
+                    ActiveModal::ChangePassword => (
+                        "Ubah Kata Sandi Akun",
+                        "Simpan Kata Sandi Baru (Enter)",
+                        460.0,
+                    ),
+                    ActiveModal::NewCustomer => {
+                        ("Tambah Pelanggan Baru", "Simpan Pelanggan (Enter)", 480.0)
+                    }
+                    ActiveModal::EditCustomer { .. } => (
+                        "Ubah Identitas & Status Pelanggan",
+                        "Simpan Perubahan (Enter)",
+                        480.0,
+                    ),
+                    ActiveModal::MergeCustomer { .. } => (
+                        "Gabungkan Pelanggan (Merge - Owner Only)",
+                        "Konfirmasi Gabungkan (Enter)",
+                        500.0,
+                    ),
+                    ActiveModal::RecordPayment => (
+                        "Catat Penerimaan Pembayaran & Alokasi FIFO",
+                        "Konfirmasi & Catat Pembayaran (Enter)",
+                        500.0,
+                    ),
+                    ActiveModal::ApplyDeposit => (
+                        "Terapkan Saldo Kredit Pelanggan ke Piutang",
+                        "Terapkan Saldo Kredit (Enter)",
+                        520.0,
+                    ),
+                    ActiveModal::ReallocatePayment { .. } => (
+                        "Realokasi Pembayaran (Owner Only - API-305)",
+                        "Simpan Realokasi (Enter)",
+                        520.0,
+                    ),
+                    ActiveModal::ReverseTransaction { .. } => (
+                        "Pembalikan Transaksi / Reversal (Owner Only)",
+                        "Konfirmasi Pembalikan (Enter)",
+                        480.0,
+                    ),
+                    ActiveModal::FilterLedgerDate => (
+                        "Filter Rentang Tanggal Buku Piutang",
+                        "Terapkan Filter (Enter)",
+                        440.0,
+                    ),
+                    ActiveModal::NewUser => (
+                        "Tambah Akun Pengguna Baru (Owner Only)",
+                        "Buat Akun Pengguna (Enter)",
+                        480.0,
+                    ),
+                    ActiveModal::EditUser { .. } => (
+                        "Ubah Peran & Status Akun Pengguna",
+                        "Simpan Perubahan Akun (Enter)",
+                        480.0,
+                    ),
+                    ActiveModal::ResetUserPassword { .. } => (
+                        "Reset Kata Sandi Sementara Pengguna",
+                        "Reset Kata Sandi (Enter)",
+                        480.0,
+                    ),
+                    ActiveModal::ChangeAsOfDate => (
+                        "Ubah Tanggal Acuan Laporan Umur Piutang",
+                        "Terapkan Tanggal Acuan (Enter)",
+                        440.0,
+                    ),
+                    _ => ("Form Dialog", "Simpan (Enter)", 460.0),
                 };
 
-                let submit_label = match modal {
-                    ActiveModal::Login => "Masuk Sistem (Enter)",
-                    ActiveModal::RecordPayment => "Simpan Pembayaran (Enter)",
-                    ActiveModal::ApplyDeposit => "Terapkan Saldo (Enter)",
-                    ActiveModal::ReverseTransaction { .. } => "Konfirmasi Batal (Enter)",
-                    _ => "Simpan Data (Enter)",
-                };
+                let dialog = ModalDialog::new(title, width);
+                let active_idx = self.form_active;
 
-                let dialog = ModalDialog::new(title, 480.0);
                 let body = div()
                     .flex()
                     .flex_col()
-                    .gap(px(12.0))
+                    .gap(px(10.0))
                     .children(
                         self.form_fields
                             .iter()
                             .enumerate()
                             .map(|(idx, (label, val))| {
-                                let is_active = idx == self.form_active;
-                                let is_pw = label.to_lowercase().contains("sandi")
-                                    || label.to_lowercase().contains("password");
+                                let is_active = idx == active_idx;
+                                let is_pw = label.to_lowercase().contains("sandi");
 
                                 div()
+                                    .id(("modal-field", idx))
                                     .flex()
                                     .flex_col()
-                                    .gap(px(4.0))
+                                    .gap(px(3.0))
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.form_active = idx;
+                                        cx.notify();
+                                    }))
                                     .child(
                                         div()
                                             .text_size(px(11.0))
                                             .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(Theme::TEXT_MUTED))
+                                            .text_color(rgb(Theme::TEXT_SECONDARY))
                                             .child(*label),
                                     )
                                     .child(
                                         div()
                                             .h(px(30.0))
+                                            .px(px(8.0))
                                             .bg(rgb(0xFFFFFF))
                                             .border_1()
                                             .border_color(rgb(if is_active {
@@ -2842,15 +4833,14 @@ impl Desktop {
                                             } else {
                                                 Theme::BORDER_STRONG
                                             }))
-                                            .rounded(px(4.0))
-                                            .px(px(8.0))
+                                            .rounded(px(3.0))
                                             .flex()
                                             .items_center()
                                             .text_size(px(12.0))
                                             .child(if val.is_empty() {
                                                 div()
                                                     .text_color(rgb(Theme::TEXT_LIGHT))
-                                                    .child("Ketik teks...")
+                                                    .child("Ketik nilai...")
                                             } else if is_pw {
                                                 div()
                                                     .text_color(rgb(Theme::TEXT_PRIMARY))
@@ -2871,9 +4861,9 @@ impl Desktop {
                                 .bg(rgb(Theme::BADGE_DEBIT_BG))
                                 .border_1()
                                 .border_color(rgb(Theme::BADGE_DEBIT_BORDER))
-                                .rounded(px(5.0))
+                                .rounded(px(3.0))
                                 .text_size(px(11.5))
-                                .font_weight(FontWeight::MEDIUM)
+                                .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
                                 .child(self.form_error.clone()),
                         )
@@ -2883,83 +4873,54 @@ impl Desktop {
                             .text_size(px(10.5))
                             .text_color(rgb(Theme::TEXT_LIGHT))
                             .child(
-                                "Pintasan: [Tab] Pindah Kolom  •  [Enter] Simpan  •  [Esc] Batal",
+                                "Pintasan: [Tab] Pindah Kolom  •  [Enter] Eksekusi  •  [Esc] Batal",
                             ),
                     )
                     .into_any_element();
 
-                let footer = div()
-                    .h(px(46.0))
-                    .bg(rgb(Theme::BG_HEADER))
-                    .border_t_1()
-                    .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .px(px(14.0))
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .id("btn-form-cancel")
-                            .h(px(28.0))
-                            .px(px(14.0))
-                            .bg(rgb(Theme::BG_CARD))
-                            .border_1()
-                            .border_color(rgb(Theme::BORDER_DEFAULT))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.active_modal = None;
-                                cx.notify();
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(11.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(Theme::TEXT_SECONDARY))
-                                    .child("Batal (Esc)"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("btn-form-submit")
-                            .h(px(28.0))
-                            .px(px(16.0))
-                            .bg(rgb(Theme::PRIMARY))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .cursor_pointer()
-                            .hover(|d| d.bg(rgb(Theme::PRIMARY_HOVER)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_modal(cx);
-                            }))
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xFFFFFF))
-                                    .child(submit_label),
-                            ),
-                    );
-
+                let footer = self.render_modal_footer(submit_label, cx);
                 Some(dialog.frame(body, footer))
             }
         }
+    }
+
+    fn render_modal_footer(&self, submit_label: &'static str, cx: &mut Context<Self>) -> Div {
+        div()
+            .h(px(42.0))
+            .bg(rgb(Theme::BG_HEADER))
+            .border_t_1()
+            .border_color(rgb(Theme::BORDER_DEFAULT))
+            .px(px(14.0))
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(8.0))
+            .child(
+                secondary_action_button("Batal (Esc)", "")
+                    .id("btn-modal-cancel")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.active_modal = None;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                primary_action_button(submit_label, "")
+                    .id("btn-modal-submit")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.submit_modal(cx);
+                    })),
+            )
     }
 }
 
 fn main() {
     Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1180.0), px(760.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1360.0), px(800.0)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("Keuangan Toko - Enterprise Edition".into()),
+                    title: Some("Keuangan Toko — Aplikasi Desktop Native".into()),
                     ..Default::default()
                 }),
                 ..Default::default()

@@ -1,5 +1,6 @@
 //! Abstraksi adapter dan tipe data untuk aplikasi desktop Keuangan Toko.
 //! Memisahkan secara tegas antarmuka pengguna (UI) dari implementasi data store (Mock sekarang, API / SQLite kelak).
+//! Seluruh tipe dan aturan bisnis diselaraskan dengan DATA_DICTIONARY.md, FEATURE_SPECIFICATIONS.md, dan crates/contracts.
 
 use chrono::NaiveDate;
 use std::fmt;
@@ -17,16 +18,24 @@ pub enum UserRole {
 impl UserRole {
     pub fn as_str(&self) -> &'static str {
         match self {
-            UserRole::Owner => "Owner",
-            UserRole::Operator => "Operator",
-            UserRole::Viewer => "Viewer",
+            UserRole::Owner => "owner",
+            UserRole::Operator => "operator",
+            UserRole::Viewer => "viewer",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            UserRole::Owner => "Pemilik (Owner)",
+            UserRole::Operator => "Operator Kasir",
+            UserRole::Viewer => "Pembaca (Viewer)",
         }
     }
 }
 
 impl fmt::Display for UserRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.label())
     }
 }
 
@@ -34,7 +43,6 @@ impl fmt::Display for UserRole {
 pub struct SessionUser {
     pub id: String,
     pub username: String,
-    pub full_name: String,
     pub role: UserRole,
     pub must_change_password: bool,
 }
@@ -46,7 +54,14 @@ pub struct AgingBuckets {
     pub days_31_45: i64,
     pub days_46_60: i64,
     pub days_over_60: i64,
-    pub exception: i64,
+    pub unknown_date: i64,
+    pub future_date: i64,
+}
+
+impl AgingBuckets {
+    pub fn exception_total(&self) -> i64 {
+        self.unknown_date + self.future_date
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -55,9 +70,9 @@ pub struct CustomerSummary {
     pub code: Option<String>,
     pub name: String,
     pub address: Option<String>,
-    pub phone: Option<String>,
-    pub active: bool,
-    pub total_outstanding_idr: i64,
+    pub is_active: bool,
+    pub version: i32,
+    pub outstanding_idr: i64,
     pub customer_credit_idr: i64,
     pub aging: AgingBuckets,
 }
@@ -68,9 +83,9 @@ pub struct CustomerDetail {
     pub code: Option<String>,
     pub name: String,
     pub address: Option<String>,
-    pub phone: Option<String>,
-    pub active: bool,
-    pub total_outstanding_idr: i64,
+    pub is_active: bool,
+    pub version: i32,
+    pub outstanding_idr: i64,
     pub customer_credit_idr: i64,
 }
 
@@ -85,7 +100,7 @@ impl AllocationStatus {
     pub fn label(&self) -> &'static str {
         match self {
             AllocationStatus::Allocated => "Lunas",
-            AllocationStatus::PartiallyAllocated => "Sebagian",
+            AllocationStatus::PartiallyAllocated => "Belum",
             AllocationStatus::Unallocated => "Belum",
         }
     }
@@ -94,7 +109,10 @@ impl AllocationStatus {
 #[derive(Debug, Clone)]
 pub struct LedgerEntry {
     pub id: String,
-    pub effective_date: NaiveDate,
+    pub entry_type: String, // "credit_sale" | "payment" | "legacy_debit" | "legacy_payment" | "reversal"
+    pub source_id: String,
+    pub effective_date: Option<NaiveDate>,
+    pub reference: Option<String>,
     pub description: String,
     pub quantity: Option<String>,
     pub unit_price_idr: Option<i64>,
@@ -106,7 +124,22 @@ pub struct LedgerEntry {
     pub age_days: Option<i32>,
     pub allocation_status: Option<AllocationStatus>,
     pub is_reversed: bool,
+    pub reversal_reason: Option<String>,
+    pub replacement_entry_id: Option<String>,
     pub source_order: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LedgerSummary {
+    pub outstanding_idr: i64,
+    pub customer_credit_idr: i64,
+    pub ledger_balance_idr: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LedgerPage {
+    pub entries: Vec<LedgerEntry>,
+    pub summary: LedgerSummary,
 }
 
 #[derive(Debug, Clone)]
@@ -122,12 +155,25 @@ pub struct PaymentRow {
     pub customer_id: String,
     pub amount_idr: i64,
     pub received_date: NaiveDate,
-    pub method: String, // "Tunai" atau "Transfer Bank"
+    pub method: String, // "cash" | "bank_transfer" | "legacy"
     pub reference: Option<String>,
     pub note: Option<String>,
+    pub status: String, // "posted" | "reversed"
+    pub version: i32,
     pub allocated_idr: i64,
     pub unallocated_credit_idr: i64,
     pub allocations: Vec<PaymentAllocationItem>,
+}
+
+impl PaymentRow {
+    pub fn method_label(&self) -> &'static str {
+        match self.method.as_str() {
+            "cash" | "Tunai" => "Tunai",
+            "bank_transfer" | "Transfer Bank" => "Transfer Bank",
+            "legacy" => "Historis",
+            _ => "Tunai",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +187,7 @@ pub struct SaleItemInput {
 pub struct InstantSaleInput {
     pub effective_date: NaiveDate,
     pub reference_no: Option<String>,
+    pub backdate_reason: Option<String>,
     pub items: Vec<SaleItemInput>,
 }
 
@@ -148,7 +195,7 @@ pub struct InstantSaleInput {
 pub struct RecordPaymentInput {
     pub received_date: NaiveDate,
     pub amount_idr: i64,
-    pub method: String, // "Tunai" | "Transfer Bank"
+    pub method: String, // "cash" | "bank_transfer"
     pub reference: Option<String>,
     pub note: Option<String>,
 }
@@ -162,17 +209,27 @@ pub struct ApplyCreditInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct ReallocatePaymentInput {
+    pub payment_id: String,
+    pub debit_entry_id: Option<String>,
+    pub amount_idr: i64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AgingReportCustomerItem {
     pub customer_id: String,
     pub customer_code: Option<String>,
     pub customer_name: String,
+    pub is_active: bool,
     pub total_outstanding_idr: i64,
     pub days_0_15: i64,
     pub days_16_30: i64,
     pub days_31_45: i64,
     pub days_46_60: i64,
     pub days_over_60: i64,
-    pub exception: i64,
+    pub unknown_date: i64,
+    pub future_date: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -184,7 +241,8 @@ pub struct AgingReport {
     pub days_31_45: i64,
     pub days_46_60: i64,
     pub days_over_60: i64,
-    pub exception: i64,
+    pub unknown_date: i64,
+    pub future_date: i64,
     pub customers: Vec<AgingReportCustomerItem>,
 }
 
@@ -192,10 +250,10 @@ pub struct AgingReport {
 pub struct UserItem {
     pub id: String,
     pub username: String,
-    pub full_name: String,
     pub role: UserRole,
-    pub active: bool,
+    pub is_active: bool,
     pub must_change_password: bool,
+    pub created_at: NaiveDate,
 }
 
 #[derive(Debug, Clone)]
@@ -203,7 +261,6 @@ pub struct CreateCustomerInput {
     pub code: Option<String>,
     pub name: String,
     pub address: Option<String>,
-    pub phone: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,23 +268,21 @@ pub struct UpdateCustomerInput {
     pub code: Option<String>,
     pub name: String,
     pub address: Option<String>,
-    pub phone: Option<String>,
-    pub active: bool,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct CreateUserInput {
     pub username: String,
-    pub full_name: String,
     pub role: UserRole,
     pub temporary_password: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct UpdateUserInput {
-    pub full_name: String,
+    pub username: String,
     pub role: UserRole,
-    pub active: bool,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -264,7 +319,7 @@ pub trait TokoStoreAdapter: Send + Sync {
     fn switch_session_role(&mut self, role: UserRole);
     fn change_password(&mut self, old_pw: &str, new_pw: &str) -> Result<(), AppError>;
 
-    // Pelanggan
+    // Pelanggan (API-101..104, API-107)
     fn list_customers(&self, query: &CustomerQuery) -> Vec<CustomerSummary>;
     fn get_customer(&self, id: &str) -> Result<CustomerDetail, AppError>;
     fn create_customer(&mut self, input: &CreateCustomerInput) -> Result<CustomerDetail, AppError>;
@@ -281,12 +336,8 @@ pub trait TokoStoreAdapter: Send + Sync {
         reason: &str,
     ) -> Result<(), AppError>;
 
-    // Buku Piutang (Ledger) & Penjualan
-    fn get_ledger(
-        &self,
-        customer_id: &str,
-        query: &LedgerQuery,
-    ) -> Result<Vec<LedgerEntry>, AppError>;
+    // Buku Piutang (Ledger) & Penjualan (API-105, API-201..203, API-304, API-306)
+    fn get_ledger(&self, customer_id: &str, query: &LedgerQuery) -> Result<LedgerPage, AppError>;
     fn create_instant_sale(
         &mut self,
         customer_id: &str,
@@ -299,7 +350,7 @@ pub trait TokoStoreAdapter: Send + Sync {
         reason: &str,
     ) -> Result<(), AppError>;
 
-    // Pembayaran & Saldo Kredit
+    // Pembayaran & Alokasi Saldo Kredit (API-106, API-301..303, API-305)
     fn list_payments(&self, customer_id: &str) -> Result<Vec<PaymentRow>, AppError>;
     fn record_payment(
         &mut self,
@@ -308,13 +359,18 @@ pub trait TokoStoreAdapter: Send + Sync {
     ) -> Result<PaymentRow, AppError>;
     fn apply_credit(&mut self, customer_id: &str, input: &ApplyCreditInput)
     -> Result<(), AppError>;
+    fn reallocate_payment(
+        &mut self,
+        customer_id: &str,
+        input: &ReallocatePaymentInput,
+    ) -> Result<(), AppError>;
 
-    // Laporan Aging
+    // Laporan Umur Piutang (API-501..502)
     fn get_aging_report(&self, as_of: NaiveDate) -> Result<AgingReport, AppError>;
 
-    // Manajemen Akun (Owner Only)
+    // Manajemen Pengguna (API-005..009 - Owner Only)
     fn list_users(&self) -> Result<Vec<UserItem>, AppError>;
     fn create_user(&mut self, input: &CreateUserInput) -> Result<UserItem, AppError>;
     fn update_user(&mut self, id: &str, input: &UpdateUserInput) -> Result<UserItem, AppError>;
-    fn reset_password(&mut self, id: &str) -> Result<String, AppError>;
+    fn reset_password(&mut self, id: &str, temporary_password: &str) -> Result<(), AppError>;
 }

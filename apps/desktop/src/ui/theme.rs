@@ -1,80 +1,80 @@
-//! Modern Enterprise Desktop Design System & Theme
-//! Menghadirkan antarmuka kelas enterprise yang modern, profesional, dan elegan:
-//! - Palet Slate / Indigo / Corporate Blue kontemporer
-//! - Tipografi bersih dengan visual hierarchy yang jelas
-//! - Badges berbingkai halus dengan sudut membulat modern
-//! - Grid lines yang presisi tanpa kesan kuno/kaku
-//! - Status bar minimalis dengan indikator status sistem bercahaya
+//! Native Desktop Design System & Theme (Windows Enterprise Desktop Style)
+//! Dirancang menyerupai aplikasi desktop akuntansi native (WinUI / WPF / Accurate Desktop / SSMS):
+//! - System Menu Bar tipis (26px) dengan permukaan netral
+//! - Left Navigation Explorer Pane (Tree/Module Navigator) dengan border pemisah tegas
+//! - Contextual Command Toolbar (36px) yang hanya menampilkan tombol sesuai halaman aktif
+//! - Native DBGrid dengan kolom indikator baris, garis sel (gridlines) presisi, dan format akuntansi `(Rp ...)`
 
 use gpui::{Hsla, rgb, rgba};
 
 pub struct Theme;
 
 impl Theme {
-    // Canvas & Surfaces
-    pub const BG_APP: u32 = 0xF8FAFC; // Latar belakang utama (Slate 50)
-    pub const BG_CARD: u32 = 0xFFFFFF; // Permukaan kartu & tabel (Putih murni)
-    pub const BG_NAVBAR: u32 = 0x0F172A; // Top App Bar Enterprise (Dark Slate 900)
-    pub const BG_NAVBAR_ACTIVE: u32 = 0x1E293B; // Item navbar aktif (Slate 800)
-    pub const BG_TOOLBAR: u32 = 0xFFFFFF; // Toolbar sub-header putih bersih
-    pub const BG_HEADER: u32 = 0xF8FAFC; // Header DBGrid halus (Slate 50)
-    pub const BG_ROW_ALT: u32 = 0xFAFCFD; // Striping baris tabel sangat halus
-    pub const BG_ROW_HOVER: u32 = 0xF1F5F9; // Hover baris tabel (Slate 100)
-    pub const BG_ROW_SELECTED: u32 = 0xEFF6FF; // Soft Enterprise Blue selection (Blue 50)
-    pub const BG_STATUS_BAR: u32 = 0xFFFFFF; // Status bar bawah modern
+    // Native Window & Panel Surfaces
+    pub const BG_SYSTEM_MENU: u32 = 0xE2E8F0; // Baris menu sistem paling atas (Slate 200)
+    pub const BG_SIDEBAR: u32 = 0xF1F5F9; // Panel navigasi kiri (Slate 100)
+    pub const BG_SIDEBAR_ACTIVE: u32 = 0xDBEAFE; // Item navigasi aktif (Blue 100)
+    pub const BG_TOOLBAR: u32 = 0xF8FAFC; // Command bar kontekstual per halaman
+    pub const BG_APP: u32 = 0xE5E7EB; // Latar workspace desktop
+    pub const BG_CARD: u32 = 0xFFFFFF; // Permukaan DBGrid & panel data
+    pub const BG_HEADER: u32 = 0xF1F5F9; // Header kolom DBGrid native
+    pub const BG_ROW_ALT: u32 = 0xF8FAFC; // Zebra striping DBGrid
+    pub const BG_ROW_HOVER: u32 = 0xEFF6FF; // Hover baris DBGrid
+    pub const BG_ROW_SELECTED: u32 = 0xDBEAFE; // Seleksi baris DBGrid aktif
+    pub const BG_STATUS_BAR: u32 = 0x1E293B; // Status bar bawah native tegas (Slate 800)
 
-    // Borders & Dividers
-    pub const BORDER_LIGHT: u32 = 0xF1F5F9; // Garis pembatas sangat halus (Slate 100)
-    pub const BORDER_DEFAULT: u32 = 0xE2E8F0; // Border standar kartu/tabel (Slate 200)
-    pub const BORDER_STRONG: u32 = 0xCBD5E1; // Border input field (Slate 300)
-    pub const GRID_LINE: u32 = 0xF1F5F9; // Grid line tabel yang tidak menyakitkan mata
+    // Borders & Gridlines (Tegas selayaknya aplikasi desktop native)
+    pub const BORDER_LIGHT: u32 = 0xE2E8F0;
+    pub const BORDER_DEFAULT: u32 = 0xCBD5E1; // Border panel & tombol toolbar native
+    pub const BORDER_STRONG: u32 = 0x94A3B8; // Border input & frame aktif
+    pub const GRID_LINE: u32 = 0xE2E8F0; // Garis sel vertikal/horizontal DBGrid
 
     // Primary & Accent Colors
-    pub const PRIMARY: u32 = 0x2563EB; // Corporate Blue (Blue 600)
-    pub const PRIMARY_HOVER: u32 = 0x1D4ED8; // Blue 700
+    pub const PRIMARY: u32 = 0x1D4ED8; // Native Desktop Blue (Blue 700)
+    pub const PRIMARY_HOVER: u32 = 0x1E40AF; // Blue 800
     pub const PRIMARY_LIGHT: u32 = 0xEFF6FF; // Blue 50
-    pub const PRIMARY_BORDER: u32 = 0xBFDBFE; // Blue 200
+    pub const PRIMARY_BORDER: u32 = 0x93C5FD; // Blue 300
 
     // Text Hierarchy
-    pub const TEXT_PRIMARY: u32 = 0x0F172A; // Slate 900 (teks utama tebal & kontras)
-    pub const TEXT_SECONDARY: u32 = 0x334155; // Slate 700 (teks konten)
-    pub const TEXT_MUTED: u32 = 0x64748B; // Slate 500 (label dan keterangan)
-    pub const TEXT_LIGHT: u32 = 0x94A3B8; // Slate 400 (placeholder / ikon sekunder)
-    pub const TEXT_ON_DARK: u32 = 0xF8FAFC; // Slate 50 (teks di atas navbar gelap)
-    pub const TEXT_LINK: u32 = 0x2563EB; // Blue 600
+    pub const TEXT_PRIMARY: u32 = 0x0F172A; // Slate 900
+    pub const TEXT_SECONDARY: u32 = 0x334155; // Slate 700
+    pub const TEXT_MUTED: u32 = 0x475569; // Slate 600
+    pub const TEXT_LIGHT: u32 = 0x64748B; // Slate 500
+    pub const TEXT_ON_DARK: u32 = 0xF8FAFC;
 
-    // Financial & Status Badges (Pill Styling)
-    pub const BADGE_DEBIT_TEXT: u32 = 0xDC2626; // Red 600
-    pub const BADGE_DEBIT_BG: u32 = 0xFEF2F2; // Red 50
-    pub const BADGE_DEBIT_BORDER: u32 = 0xFECACA; // Red 200
+    // Financial & Status Colors
+    pub const BADGE_DEBIT_TEXT: u32 = 0xB91C1C; // Red 700
+    pub const BADGE_DEBIT_BG: u32 = 0xFEF2F2;
+    pub const BADGE_DEBIT_BORDER: u32 = 0xFCA5A5;
 
-    pub const BADGE_CREDIT_TEXT: u32 = 0x16A34A; // Green 600
-    pub const BADGE_CREDIT_BG: u32 = 0xF0FDF4; // Green 50
-    pub const BADGE_CREDIT_BORDER: u32 = 0xBBF7D0; // Green 200
+    pub const BADGE_CREDIT_TEXT: u32 = 0x15803D; // Green 700
+    pub const BADGE_CREDIT_BG: u32 = 0xF0FDF4;
+    pub const BADGE_CREDIT_BORDER: u32 = 0x86EFAC;
 
-    pub const BADGE_DEPOSIT_TEXT: u32 = 0x2563EB; // Blue 600
-    pub const BADGE_DEPOSIT_BG: u32 = 0xEFF6FF; // Blue 50
-    pub const BADGE_DEPOSIT_BORDER: u32 = 0xBFDBFE; // Blue 200
+    pub const BADGE_LUNAS_TEXT: u32 = 0x0E7490; // Cyan 700 (seperti web Lunas badge)
+    pub const BADGE_LUNAS_BG: u32 = 0xECFEFF;
+    pub const BADGE_LUNAS_BORDER: u32 = 0xA5F3FC;
 
-    pub const BADGE_WARNING_TEXT: u32 = 0xD97706; // Amber 600
-    pub const BADGE_WARNING_BG: u32 = 0xFFFBEB; // Amber 50
-    pub const BADGE_WARNING_BORDER: u32 = 0xFDE68A; // Amber 200
+    pub const BADGE_DEPOSIT_TEXT: u32 = 0x1D4ED8; // Blue 700
+    pub const BADGE_DEPOSIT_BG: u32 = 0xEFF6FF;
+    pub const BADGE_DEPOSIT_BORDER: u32 = 0x93C5FD;
+
+    pub const BADGE_WARNING_TEXT: u32 = 0xB45309; // Amber 700
+    pub const BADGE_WARNING_BG: u32 = 0xFFFBEB;
+    pub const BADGE_WARNING_BORDER: u32 = 0xFCD34D;
 
     pub const BADGE_CRITICAL_TEXT: u32 = 0x991B1B; // Red 800
-    pub const BADGE_CRITICAL_BG: u32 = 0xFEE2E2; // Red 100
-    pub const BADGE_CRITICAL_BORDER: u32 = 0xFCA5A5; // Red 300
+    pub const BADGE_CRITICAL_BG: u32 = 0xFEE2E2;
+    pub const BADGE_CRITICAL_BORDER: u32 = 0xFCA5A5;
 
-    // Modal / Windowed Dialog Styling
-    pub const MODAL_HEADER_BG: u32 = 0xFFFFFF; // Header modal modern putih bersih
-    pub const MODAL_BORDER: u32 = 0xE2E8F0;
-    pub const MODAL_BACKDROP: u32 = 0x0F172A; // Backdrop modern dark slate
+    pub const BADGE_EXCEPTION_TEXT: u32 = 0x6B21A8; // Purple 800 (Unknown / Future Date)
+    pub const BADGE_EXCEPTION_BG: u32 = 0xFAF5FF;
+    pub const BADGE_EXCEPTION_BORDER: u32 = 0xD8B4FE;
 
-    // Buttons
-    pub const BTN_PRIMARY_BG: u32 = 0x2563EB;
-    pub const BTN_PRIMARY_TEXT: u32 = 0xFFFFFF;
-    pub const BTN_SECONDARY_BG: u32 = 0xF8FAFC;
-    pub const BTN_SECONDARY_BORDER: u32 = 0xE2E8F0;
-    pub const BTN_SECONDARY_TEXT: u32 = 0x334155;
+    // Modal / Native Dialog Window Styling
+    pub const MODAL_HEADER_BG: u32 = 0x1E293B; // Native window titlebar slate
+    pub const MODAL_BORDER: u32 = 0x64748B;
+    pub const MODAL_BACKDROP: u32 = 0x0F172A;
 
     pub fn hsla(hex: u32) -> Hsla {
         rgb(hex).into()
@@ -85,6 +85,7 @@ impl Theme {
     }
 }
 
+/// Format angka integer IDR menjadi string ribuan bertitik (contoh: `1.938.200`).
 pub fn format_idr(amount: i64) -> String {
     let s = amount.abs().to_string();
     let mut result = String::new();
@@ -100,5 +101,24 @@ pub fn format_idr(amount: i64) -> String {
         format!("-{}", result)
     } else {
         result
+    }
+}
+
+/// Format nominal rupiah standar (contoh: `Rp 1.938.200`).
+pub fn format_rupiah(amount: i64) -> String {
+    if amount < 0 {
+        format!("-Rp {}", format_idr(amount.abs()))
+    } else {
+        format!("Rp {}", format_idr(amount))
+    }
+}
+
+/// Format saldo berjalan akuntansi sesuai FR-004:
+/// Nilai negatif diformat dalam tanda kurung akuntansi `(Rp 18.900)`.
+pub fn format_accounting_rupiah(amount: i64) -> String {
+    if amount < 0 {
+        format!("(Rp {})", format_idr(amount.abs()))
+    } else {
+        format!("Rp {}", format_idr(amount))
     }
 }
