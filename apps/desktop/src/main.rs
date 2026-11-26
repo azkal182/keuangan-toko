@@ -2958,6 +2958,10 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(gpui::TitlebarOptions {
+                    title: Some("Keuangan Toko - Enterprise Edition".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             |_, cx| cx.new(Desktop::new),
