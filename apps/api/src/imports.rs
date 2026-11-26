@@ -1701,14 +1701,17 @@ fn parse_workbook(bytes: &[u8], business_today: chrono::NaiveDate) -> Result<Vec
                     formula_markers[col as usize] = formula.is_some();
                 }
                 raw.push(json!({"column":column_name(col as usize),"value":raw_value,"formula":formula.is_some()}));
-                if formula.is_some() && col >= 7 {
+                let is_debit_formula_with_value = col == 5
+                    && formula.is_some()
+                    && parse_integer(&raw_value).is_some_and(|v| v > 0);
+                if formula.is_some() && !is_debit_formula_with_value {
                     issues.insert("formula_value_ignored");
                 }
                 if let Data::Error(_) = cell {
                     issues.insert("cell_error");
                 }
                 if (col as usize) < values.len() {
-                    values[col as usize] = if formula.is_some() && col >= 7 {
+                    values[col as usize] = if formula.is_some() && !is_debit_formula_with_value {
                         Value::Null
                     } else {
                         raw_value
@@ -1773,7 +1776,7 @@ fn parse_workbook(bytes: &[u8], business_today: chrono::NaiveDate) -> Result<Vec
             } else {
                 parse_integer(&values[5])
             };
-            let credit = if values[6].is_null() {
+            let credit = if values[6].is_null() && !formula_markers[6] {
                 Some(0)
             } else {
                 parse_integer(&values[6])

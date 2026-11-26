@@ -821,6 +821,18 @@ function CustomerRowsDialog({
   );
 }
 
+const issueLabels: Record<string, string> = {
+  duplicate_source_row: "Duplikat Baris",
+  invalid_debit_credit: "Debit/Kredit 0",
+  invalid_or_missing_date: "Tanggal Kosong/Salah",
+  invalid_amount: "Nominal Salah",
+  mixed_debit_credit: "Debit & Kredit Terisi",
+  quantity_price_mismatch: "Qty × Harga Beda",
+  future_business_date: "Tanggal Masa Depan",
+  cell_error: "Cell Error",
+  formula_customer_identity: "Identitas Formula",
+};
+
 function ImportRowCard({
   batchId,
   row,
@@ -881,6 +893,9 @@ function ImportRowCard({
   }
 
   const parsed = asRecord(row.parsed_values);
+  const rowIssues = Array.isArray(row.issues)
+    ? (row.issues as string[]).filter((i) => typeof i === "string" && i !== "transaction_data_issue")
+    : [];
 
   return (
     <>
@@ -901,18 +916,32 @@ function ImportRowCard({
         </td>
 
         <td className="p-2.5">
-          <Badge
-            variant={
-              row.review_status === "accepted" || row.review_status === "committed"
-                ? "success"
-                : row.review_status === "quarantined"
-                ? "destructive"
-                : "secondary"
-            }
-            className="text-[10px]"
-          >
-            {row.review_status}
-          </Badge>
+          <div className="flex flex-col gap-1 items-start">
+            <Badge
+              variant={
+                row.review_status === "accepted" || row.review_status === "committed"
+                  ? "success"
+                  : row.review_status === "quarantined"
+                  ? "destructive"
+                  : "secondary"
+              }
+              className="text-[10px]"
+            >
+              {row.review_status}
+            </Badge>
+            {rowIssues.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {rowIssues.map((issue) => (
+                  <span
+                    key={issue}
+                    className="text-[9px] font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded px-1"
+                  >
+                    {issueLabels[issue] ?? issue}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </td>
 
         <td className="p-2.5 pr-4 text-center">
@@ -933,6 +962,16 @@ function ImportRowCard({
         title={`Telaah Baris ${row.row_number} (${row.sheet_name})`}
       >
         <form onSubmit={save} className="space-y-4">
+          {rowIssues.length > 0 && (
+            <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-1">
+              <span className="font-semibold block text-[11px]">Isu / Alasan Karantina:</span>
+              <ul className="list-disc list-inside text-[11px] space-y-0.5">
+                {rowIssues.map((issue) => (
+                  <li key={issue}>{issueLabels[issue] ?? issue}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-700" htmlFor="row-action">
               Tindakan Telaah (Action)
