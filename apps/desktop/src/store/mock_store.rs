@@ -1193,33 +1193,14 @@ impl TokoStoreAdapter for MockDataAdapter {
         customer_id: &str,
         input: &InstantSaleInput,
     ) -> Result<i64, AppError> {
-        let role = self.ensure_can_write()?;
+        let _role = self.ensure_can_write()?;
         let today = Local::now().date_naive();
 
-        // BR-012 / FR-002: Tanggal masa depan ditolak; backdate hanya Owner dengan alasan
+        // Tanggal masa depan ditolak; tanggal lampau diperbolehkan tanpa wajib alasan
         if input.effective_date > today {
             return Err(AppError(
-                "Tanggal transaksi penjualan tidak boleh berada di masa depan (FR-002).".into(),
+                "Tanggal transaksi penjualan tidak boleh berada di masa depan.".into(),
             ));
-        }
-        if input.effective_date < today {
-            if role != UserRole::Owner {
-                return Err(AppError(
-                    "Pencatatan tanggal lampau (backdate) hanya diizinkan untuk Pemilik (Owner)."
-                        .into(),
-                ));
-            }
-            let has_reason = input
-                .backdate_reason
-                .as_ref()
-                .map(|r| !r.trim().is_empty())
-                .unwrap_or(false);
-            if !has_reason {
-                return Err(AppError(
-                    "Alasan tanggal lampau (backdate reason) wajib diisi untuk transaksi masa lalu."
-                        .into(),
-                ));
-            }
         }
 
         let cust = self

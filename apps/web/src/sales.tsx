@@ -370,7 +370,7 @@ function SaleForm({
       customer_id: customer.id,
       effective_date: date,
       reference_no: String(data.get("reference") ?? "") || null,
-      backdate_reason: owner && date < today ? String(data.get("reason") ?? "") : null,
+      backdate_reason: date < today ? (String(data.get("reason") ?? "").trim() || null) : null,
       items: items.map(({ description, quantity, unit_price_idr }) => ({
         description,
         quantity,
@@ -418,7 +418,6 @@ function SaleForm({
             required
             value={date}
             max={today}
-            min={owner ? undefined : today}
             aria-invalid={!!error?.fields.effective_date}
             onChange={(e) => setDate(e.target.value)}
             className="text-xs"
@@ -439,19 +438,18 @@ function SaleForm({
           />
         </div>
 
-        {owner && date && date < today && (
+        {date && date < today && (
           <div className="sm:col-span-2 space-y-1.5">
             <label className="text-xs font-semibold text-amber-900" htmlFor="sale-backdate-reason">
-              Alasan Tanggal Lampau (Backdate) <span className="text-rose-600">*</span>
+              Catatan / Alasan Tanggal Lampau (opsional)
             </label>
             <textarea
               id="sale-backdate-reason"
               name="reason"
               rows={2}
               maxLength={1000}
-              required
               defaultValue={sale?.backdate_reason ?? ""}
-              placeholder="Jelaskan alasan pencatatan tanggal lampau untuk keperluan audit…"
+              placeholder="Catatan tanggal lampau untuk riwayat pembukuan (opsional)…"
               className="w-full rounded-lg border border-amber-300 bg-amber-50/50 p-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-700"
             />
           </div>

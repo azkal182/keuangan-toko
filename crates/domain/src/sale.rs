@@ -67,19 +67,12 @@ pub enum SaleDateError {
 pub fn validate_date(
     effective: NaiveDate,
     today: NaiveDate,
-    role: Role,
-    reason: Option<&str>,
+    _role: Role,
+    _reason: Option<&str>,
 ) -> Result<(), SaleDateError> {
     if effective > today {
         return Err(SaleDateError::Future);
     }
-    if effective < today {
-        if role != Role::Owner {
-            return Err(SaleDateError::OwnerRequired);
-        }
-        if reason.is_none_or(|reason| reason.trim().is_empty()) {
-            return Err(SaleDateError::ReasonRequired);
-        }
-    }
+    // Tanggal lampau diperbolehkan secara bebas untuk semua pengguna toko tanpa wajib alasan
     Ok(())
 }

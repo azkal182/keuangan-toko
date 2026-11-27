@@ -6,6 +6,9 @@
 
 ## Ringkasan
 
+- **Pelonggaran Validasi Tanggal Lampau Belanja/Pembayaran (27 November 2026):**
+  Mengizinkan pencatatan belanja (penjualan kredit) dan pembayaran dengan tanggal usaha sebelum hari ini (*backdated*) secara bebas tanpa mewajibkan alasan atau membatasi pada peran Owner. Memperbarui domain `crates/domain/src/sale.rs`, formulir web `apps/web/src/sales.tsx` (alasan backdate dijadikan opsional, batas minimum kalender dihilangkan), dan store desktop `apps/desktop/src/store/mock_store.rs`. Tanggal masa depan tetap diblokir secara ketat untuk menjaga integritas waktu pembukuan. Seluruh unit test (24 unit tests) dan linter clippy lulus 100%.
+
 - **Integrasi Aplikasi Desktop Native GPUI (27 November 2026, merge `feat/desktop-native-mock` ke `main`):**
   Menggabungkan aplikasi desktop Keuangan Toko berbasis Rust + GPUI ke branch utama monorepo. Desktop kini mendukung dua mode adapter: in-memory `MockDataAdapter` dan live `HttpApiAdapter` yang terintegrasi langsung dengan API backend Axum (sesi login, validasi `/auth/me` otomatis saat startup & F9, daftar pelanggan, buku piutang, riwayat pembayaran, laporan aging, dan manajemen akun). Dilengkapi UI Windows profesional (Menu Bar Alt-shortcut, Quick Action Toolbar, DBGrid dengan garis batas tajam dan sorotan Windows Blue, native vertical scroll `.overflow_y_scroll()`, baris paginasi 50 item, indikator loading interaktif, form modal windowed dengan kursor aktif dan focus ring), serta konfigurasi compiler opt-level untuk performa responsif instan. Seluruh kode lolos clippy dan unit test workspace.
 
