@@ -330,6 +330,11 @@ pub trait TokoStoreAdapter: Send + Sync {
 
     // Sesi & Pengguna
     fn current_session(&self) -> Option<SessionUser>;
+    /// Validasi/pulihkan sesi aktif di sumber data (API: `GET /auth/me`).
+    /// Mengembalikan `None` bila tidak ada sesi aktif.
+    fn restore_session(&mut self) -> Option<SessionUser> {
+        self.current_session()
+    }
     fn login(&mut self, username: &str, password: &str) -> Result<SessionUser, AppError>;
     fn logout(&mut self);
     fn switch_session_role(&mut self, role: UserRole);

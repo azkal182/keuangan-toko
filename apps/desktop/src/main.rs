@@ -111,8 +111,8 @@ pub struct Desktop {
 
 impl Desktop {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let store = build_store_from_env();
-        let session = store.current_session();
+        let mut store = build_store_from_env();
+        let session = store.restore_session();
         let today = Local::now().date_naive();
         let first_cust_id = if session.is_some() {
             store
@@ -1335,7 +1335,13 @@ impl Desktop {
             }
             "f9" => {
                 self.store.invalidate_cache();
-                self.status_msg = "Data dimuat ulang dari sumber (cache dibersihkan).".into();
+                self.session = self.store.restore_session();
+                if self.session.is_some() {
+                    self.status_msg = "Data dimuat ulang dari sumber (cache dibersihkan).".into();
+                } else {
+                    self.status_msg = "Sesi berakhir. Silakan masuk kembali.".into();
+                    self.open_login_modal();
+                }
                 cx.notify();
             }
             "f8" => {

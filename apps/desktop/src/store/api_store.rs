@@ -36,6 +36,23 @@ struct ApiSession {
     csrf: String,
 }
 
+/// Parse respons `GET /auth/me` menjadi pengguna + token CSRF.
+/// Menerima `data.user{...}` maupun field pengguna langsung di `data`.
+fn parse_me(resp: &Value) -> Option<(SessionUser, String)> {
+    let d = &resp["data"];
+    let u = if d["user"].is_object() { &d["user"] } else { d };
+    let user = SessionUser {
+        id: vs(u, "id")?,
+        username: vs(u, "username").unwrap_or_default(),
+        role: parse_role(&vs(u, "role").unwrap_or_default()),
+        must_change_password: d["must_change_password"]
+            .as_bool()
+            .or_else(|| u["must_change_password"].as_bool())
+            .unwrap_or(false),
+    };
+    Some((user, vs(d, "csrf_token").unwrap_or_default()))
+}
+
 type CacheMap = HashMap<String, (Instant, Box<dyn Any + Send>)>;
 
 pub struct HttpApiAdapter {
@@ -399,6 +416,36 @@ impl TokoStoreAdapter for HttpApiAdapter {
             .unwrap()
             .as_ref()
             .map(|s| s.user.clone())
+    }
+
+    fn restore_session(&mut self) -> Option<SessionUser> {
+        // GET /auth/me: sesi masih valid? Sekaligus menyegarkan role, flag ganti sandi dan CSRF.
+        match self.get("/api/v1/auth/me", &[]) {
+            Ok(resp) => {
+                let (user, csrf) = parse_me(&resp)?;
+                // CSRF baru dari server; bila kosong, pertahankan token sesi sebelumnya.
+                let csrf = if csrf.is_empty() {
+                    self.session
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map(|s| s.csrf.clone())
+                        .unwrap_or_default()
+                } else {
+                    csrf
+                };
+                *self.session.lock().unwrap() = Some(ApiSession {
+                    user: user.clone(),
+                    csrf,
+                });
+                Some(user)
+            }
+            Err(_) => {
+                *self.session.lock().unwrap() = None;
+                self.clear_cache();
+                None
+            }
+        }
     }
 
     fn login(&mut self, username: &str, password: &str) -> Result<SessionUser, AppError> {
@@ -971,6 +1018,22 @@ mod tests {
         assert_eq!(e.quantity.as_deref(), Some("51"));
         assert_eq!(e.allocation_status, Some(AllocationStatus::Allocated));
         assert_eq!(e.effective_date, NaiveDate::from_ymd_opt(2025, 9, 23));
+    }
+
+    #[test]
+    fn parses_auth_me_nested_and_flat() {
+        let nested = json!({"data":{"user":{"id":"u1","username":"owner","role":"owner"},
+            "must_change_password":true,"csrf_token":"tok"}});
+        let (u, c) = parse_me(&nested).unwrap();
+        assert_eq!(
+            (u.id.as_str(), c.as_str(), u.must_change_password),
+            ("u1", "tok", true)
+        );
+        let flat = json!({"data":{"id":"u2","username":"kasir","role":"staff"}});
+        let (u, c) = parse_me(&flat).unwrap();
+        assert_eq!(u.username, "kasir");
+        assert!(c.is_empty());
+        assert!(parse_me(&json!({"data":{}})).is_none());
     }
 
     #[test]
