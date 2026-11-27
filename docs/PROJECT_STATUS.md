@@ -176,3 +176,9 @@ Gunakan `.agents/skills/toko-project-status/SKILL.md`. Setiap pembaruan harus me
 - Perbaikan UI/UX input form modal dan tabel transaksi agar memiliki visual focus state yang tegas dan kursor bar aktif.
 - Helper ender_native_text_box memberikan border kontras (Blue 600), glow focus ring (shadow), penanda label aktif (?), serta kursor bar berkedip/tegas pada input teks biasa, password, form penjualan kredit, dan kotak pencarian pelanggan.
 - Verifikasi: cargo clippy -p toko-desktop --offline -- -D warnings bersih, 16 unit test lulus, cargo build -p toko-desktop --offline berhasil.
+
+## Desktop: Native Scroll, Pagination DBGrid, dan Loading State (feat/desktop-native-mock)
+- Mengaktifkan .overflow_y_scroll() pada container DBGrid (cust-list-scroll, ledger-scroll, payments-scroll, ging-drill-scroll, user-mgr-scroll) sehingga tabel dapat di-scroll vertikal secara native.
+- Mengimplementasikan komponen ender_pagination_bar (50 item per halaman) dengan navigasi halaman sebelumnya / berikutnya yang presisi dan ringan untuk rendering GPUI.
+- Menambahkan indikator loading: ender_loading_state pada DBGrid, teks status interaktif pada tombol modal saat submit, dan indikator loading pada status bar bawah.
+- Verifikasi: cargo clippy -p toko-desktop --offline -- -D warnings bersih (0 warning), 16 tes lolos, binary dev berhasil di-build.

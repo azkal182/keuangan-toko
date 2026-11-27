@@ -19,7 +19,7 @@ use store::mock_store::{MockDataAdapter, compute_line_total_half_up};
 use store::*;
 use ui::db_grid::{
     ColumnAlign, GridColumn, grid_badge, grid_cell, grid_cell_styled, grid_row_indicator,
-    render_empty_state, render_grid_header,
+    render_empty_state, render_grid_header, render_loading_state, render_pagination_bar,
 };
 use ui::menu_bar::{
     render_left_sidebar_container, render_system_menu_bar, sidebar_nav_item,
@@ -106,6 +106,14 @@ pub struct Desktop {
     // State khusus aging report
     aging_as_of: NaiveDate,
     aging_selected_bucket: Option<usize>, // None=Semua, 0=0-15, 1=16-30, 2=31-45, 3=46-60, 4=>60, 5=unknown, 6=future
+    // Pagination per modul
+    customer_page: usize,
+    ledger_page_idx: usize,
+    payment_page_idx: usize,
+    page_size: usize,
+    // State loading UI
+    is_loading: bool,
+    loading_label: String,
     focus: FocusHandle,
 }
 
@@ -146,6 +154,12 @@ impl Desktop {
             sale_active_field: (0, 0),
             aging_as_of: today,
             aging_selected_bucket: None,
+            customer_page: 0,
+            ledger_page_idx: 0,
+            payment_page_idx: 0,
+            page_size: 50,
+            is_loading: false,
+            loading_label: String::new(),
             focus: cx.focus_handle(),
         };
         if this.session.is_none() {
@@ -1732,16 +1746,21 @@ impl Render for Desktop {
                     ),
             )
             // 3. NATIVE DESKTOP STATUS BAR (24px)
-            .child(
+            .child({
+                let status_display = if self.is_loading {
+                    format!("⏳ {} | {}", self.loading_label, self.status_msg)
+                } else {
+                    self.status_msg.clone()
+                };
                 StatusBar::new(
-                    &self.status_msg,
+                    &status_display,
                     self.active_module_name(),
                     &date_label,
                     &user_display,
                 )
                 .adapter(self.store.adapter_label())
-                .render(),
-            )
+                .render()
+            })
             // 4. MODAL DIALOGS OVERLAY
             .children(self.render_modal_overlay(cx))
     }
@@ -1897,6 +1916,12 @@ impl Desktop {
         let total_piutang: i64 = customers.iter().map(|c| c.outstanding_idr).sum();
         let total_deposit: i64 = customers.iter().map(|c| c.customer_credit_idr).sum();
         let total_over_60: i64 = customers.iter().map(|c| c.aging.days_over_60).sum();
+
+        // Pagination slice
+        let page_size = self.page_size;
+        let start_idx = (self.customer_page * page_size).min(total_customers);
+        let end_idx = (start_idx + page_size).min(total_customers);
+        let paged_customers: Vec<_> = customers[start_idx..end_idx].to_vec();
 
         // Kolom persis seperti Buku Ringkasan Saldo Pelanggan di Web & CustomerSummary Contract
         let columns = vec![
@@ -2154,7 +2179,10 @@ impl Desktop {
                                 div()
                                     .id("cust-list-scroll")
                                     .flex_1()
-                                    .children(if customers.is_empty() {
+                                    .overflow_y_scroll()
+                                    .children(if self.is_loading {
+                                        vec![render_loading_state(&self.loading_label).into_any_element()]
+                                    } else if paged_customers.is_empty() {
                                         vec![
                                             render_empty_state(
                                                 "Tidak ada pelanggan yang ditemukan.",
@@ -2162,7 +2190,7 @@ impl Desktop {
                                             .into_any_element(),
                                         ]
                                     } else {
-                                        customers
+                                        paged_customers
                                             .into_iter()
                                             .enumerate()
                                             .map(|(idx, cust)| {
@@ -2171,7 +2199,7 @@ impl Desktop {
                                                         == Some(&cust.id);
                                                 let bg_color = if is_selected {
                                                     Theme::BG_ROW_SELECTED
-                                                } else if idx % 2 == 1 {
+                                                } else if (start_idx + idx) % 2 == 1 {
                                                     Theme::BG_ROW_ALT
                                                 } else {
                                                     Theme::BG_CARD
@@ -2211,7 +2239,7 @@ impl Desktop {
                                                         },
                                                     ))
                                                     .child(grid_row_indicator(
-                                                        idx + 1,
+                                                        start_idx + idx + 1,
                                                         is_selected,
                                                     ))
                                                     .child(grid_cell(
@@ -2325,7 +2353,26 @@ impl Desktop {
                                             })
                                             .collect()
                                     }),
-                            ),
+                            )
+                            .child(render_pagination_bar(
+                                self.customer_page,
+                                total_customers,
+                                page_size,
+                                "btn-cust-prev",
+                                "btn-cust-next",
+                                cx.listener(|this, _, _, cx| {
+                                    if this.customer_page > 0 {
+                                        this.customer_page -= 1;
+                                        cx.notify();
+                                    }
+                                }),
+                                cx.listener(move |this, _, _, cx| {
+                                    if (this.customer_page + 1) * page_size < total_customers {
+                                        this.customer_page += 1;
+                                        cx.notify();
+                                    }
+                                }),
+                            )),
                     ),
             )
     }
@@ -2767,6 +2814,11 @@ impl Desktop {
 
     fn render_ledger_grid(&self, ledger: &[LedgerEntry], cx: &mut Context<Self>) -> Div {
         let is_owner = self.is_owner();
+        let total_items = ledger.len();
+        let page_size = self.page_size;
+        let start_idx = (self.ledger_page_idx * page_size).min(total_items);
+        let end_idx = (start_idx + page_size).min(total_items);
+        let paged_ledger = &ledger[start_idx..end_idx];
         let columns = vec![
             GridColumn {
                 title: "TANGGAL",
@@ -2843,7 +2895,10 @@ impl Desktop {
                 div()
                     .id("ledger-scroll")
                     .flex_1()
-                    .children(if ledger.is_empty() {
+                    .overflow_y_scroll()
+                    .children(if self.is_loading {
+                        vec![render_loading_state(&self.loading_label).into_any_element()]
+                    } else if paged_ledger.is_empty() {
                         vec![
                             render_empty_state(
                                 "Belum ada transaksi buku piutang pada periode yang dipilih.",
@@ -2851,11 +2906,11 @@ impl Desktop {
                             .into_any_element(),
                         ]
                     } else {
-                        ledger
+                        paged_ledger
                             .iter()
                             .enumerate()
                             .map(|(idx, entry)| {
-                                let bg_color = if idx % 2 == 1 {
+                                let bg_color = if (start_idx + idx) % 2 == 1 {
                                     Theme::BG_ROW_ALT
                                 } else {
                                     Theme::BG_CARD
@@ -2902,7 +2957,7 @@ impl Desktop {
                                     .border_color(rgb(Theme::GRID_LINE))
                                     .flex()
                                     .items_center()
-                                    .child(grid_row_indicator(idx + 1, false))
+                                    .child(grid_row_indicator(start_idx + idx + 1, false))
                                     .child(grid_cell(date_str, 92.0, ColumnAlign::Center, false))
                                     .child(grid_cell_styled(
                                         desc_str,
@@ -3101,11 +3156,35 @@ impl Desktop {
                             .collect()
                     }),
             )
+            .child(render_pagination_bar(
+                self.ledger_page_idx,
+                total_items,
+                page_size,
+                "btn-ledger-prev",
+                "btn-ledger-next",
+                cx.listener(|this, _, _, cx| {
+                    if this.ledger_page_idx > 0 {
+                        this.ledger_page_idx -= 1;
+                        cx.notify();
+                    }
+                }),
+                cx.listener(move |this, _, _, cx| {
+                    if (this.ledger_page_idx + 1) * page_size < total_items {
+                        this.ledger_page_idx += 1;
+                        cx.notify();
+                    }
+                }),
+            ))
     }
 
     fn render_payments_grid(&self, payments: &[PaymentRow], cx: &mut Context<Self>) -> Div {
         let can_write = self.can_write();
         let is_owner = self.is_owner();
+        let total_items = payments.len();
+        let page_size = self.page_size;
+        let start_idx = (self.payment_page_idx * page_size).min(total_items);
+        let end_idx = (start_idx + page_size).min(total_items);
+        let paged_payments = &payments[start_idx..end_idx];
         let columns = vec![
             GridColumn {
                 title: "TGL DITERIMA",
@@ -3168,7 +3247,10 @@ impl Desktop {
                 div()
                     .id("payments-scroll")
                     .flex_1()
-                    .children(if payments.is_empty() {
+                    .overflow_y_scroll()
+                    .children(if self.is_loading {
+                        vec![render_loading_state(&self.loading_label).into_any_element()]
+                    } else if paged_payments.is_empty() {
                         vec![
                             render_empty_state(
                                 "Belum ada riwayat pembayaran untuk pelanggan ini.",
@@ -3176,11 +3258,11 @@ impl Desktop {
                             .into_any_element(),
                         ]
                     } else {
-                        payments
+                        paged_payments
                             .iter()
                             .enumerate()
                             .map(|(idx, p)| {
-                                let bg_color = if idx % 2 == 1 {
+                                let bg_color = if (start_idx + idx) % 2 == 1 {
                                     Theme::BG_ROW_ALT
                                 } else {
                                     Theme::BG_CARD
@@ -3210,7 +3292,7 @@ impl Desktop {
                                     .border_color(rgb(Theme::GRID_LINE))
                                     .flex()
                                     .items_center()
-                                    .child(grid_row_indicator(idx + 1, false))
+                                    .child(grid_row_indicator(start_idx + idx + 1, false))
                                     .child(grid_cell(date_str, 95.0, ColumnAlign::Center, false))
                                     .child(grid_cell(method_str, 105.0, ColumnAlign::Center, false))
                                     .child(if is_posted {
@@ -3341,11 +3423,30 @@ impl Desktop {
                                                 )
                                             }),
                                     )
-                                    .into_any_element()
-                            })
-                            .collect()
-                    }),
+                            .into_any_element()
+                    })
+                    .collect()
+            })
             )
+            .child(render_pagination_bar(
+                self.payment_page_idx,
+                total_items,
+                page_size,
+                "btn-pay-prev",
+                "btn-pay-next",
+                cx.listener(|this, _, _, cx| {
+                    if this.payment_page_idx > 0 {
+                        this.payment_page_idx -= 1;
+                        cx.notify();
+                    }
+                }),
+                cx.listener(move |this, _, _, cx| {
+                    if (this.payment_page_idx + 1) * page_size < total_items {
+                        this.payment_page_idx += 1;
+                        cx.notify();
+                    }
+                }),
+            ))
     }
 
     // =========================================================================
@@ -3616,6 +3717,7 @@ impl Desktop {
                                 div()
                                     .id("aging-drill-scroll")
                                     .flex_1()
+                                    .overflow_y_scroll()
                                     .children(if filtered_customers.is_empty() {
                                         vec![
                                             render_empty_state(
@@ -3742,7 +3844,7 @@ impl Desktop {
                                             })
                                             .collect()
                                     }),
-                            ),
+                            )
                     ),
             )
     }
@@ -3895,7 +3997,11 @@ impl Desktop {
                             .overflow_hidden()
                             .child(render_grid_header(&columns))
                             .child(
-                                div().id("user-mgr-scroll").flex_1().children(
+                                div()
+                                    .id("user-mgr-scroll")
+                                    .flex_1()
+                                    .overflow_y_scroll()
+                                    .children(
                                     users
                                         .into_iter()
                                         .enumerate()
@@ -4912,6 +5018,13 @@ impl Desktop {
     }
 
     fn render_modal_footer(&self, submit_label: &'static str, cx: &mut Context<Self>) -> Div {
+        let is_loading = self.is_loading;
+        let submit_text = if is_loading {
+            "Memproses ke Server..."
+        } else {
+            submit_label
+        };
+
         div()
             .h(px(42.0))
             .bg(rgb(Theme::BG_HEADER))
@@ -4926,15 +5039,19 @@ impl Desktop {
                 secondary_action_button("Batal (Esc)", "")
                     .id("btn-modal-cancel")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.active_modal = None;
-                        cx.notify();
+                        if !this.is_loading {
+                            this.active_modal = None;
+                            cx.notify();
+                        }
                     })),
             )
             .child(
-                primary_action_button(submit_label, "")
+                primary_action_button(submit_text, "")
                     .id("btn-modal-submit")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.submit_modal(cx);
+                        if !this.is_loading {
+                            this.submit_modal(cx);
+                        }
                     })),
             )
     }
