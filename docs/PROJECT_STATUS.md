@@ -6,6 +6,9 @@
 
 ## Ringkasan
 
+- **Integrasi Aplikasi Desktop Native GPUI (27 November 2026, merge `feat/desktop-native-mock` ke `main`):**
+  Menggabungkan aplikasi desktop Keuangan Toko berbasis Rust + GPUI ke branch utama monorepo. Desktop kini mendukung dua mode adapter: in-memory `MockDataAdapter` dan live `HttpApiAdapter` yang terintegrasi langsung dengan API backend Axum (sesi login, validasi `/auth/me` otomatis saat startup & F9, daftar pelanggan, buku piutang, riwayat pembayaran, laporan aging, dan manajemen akun). Dilengkapi UI Windows profesional (Menu Bar Alt-shortcut, Quick Action Toolbar, DBGrid dengan garis batas tajam dan sorotan Windows Blue, native vertical scroll `.overflow_y_scroll()`, baris paginasi 50 item, indikator loading interaktif, form modal windowed dengan kursor aktif dan focus ring), serta konfigurasi compiler opt-level untuk performa responsif instan. Seluruh kode lolos clippy dan unit test workspace.
+
 - **Penyelarasan Tie-Breaker FIFO Pembayaran & Form Input Tanggal (27 November 2026):**
   1. Menyelaraskan urutan pengambilan debit terbuka (`OpenDebit`) pada alokasi pembayaran FIFO di `apps/api/src/payments.rs` dan `crates/domain/src/payment.rs` dengan menambahkan tie-breaker `source_order` (`ORDER BY 2 NULLS LAST, 3 NULLS LAST, 4, 1`). Hal ini menuntaskan anomali status pelunasan yang melompat acak pada baris transaksi di tanggal yang sama di buku piutang pelanggan. Lolos `cargo fmt`, `cargo clippy`, dan unit test `cargo test --workspace --locked` (8 tests lolos).
   2. Memperbaiki formulir web pada Dialog Catat Belanja (`apps/web/src/components/record-sale-dialog.tsx`) dan Formulir Pembayaran (`apps/web/src/payments.tsx`) agar tanggal transaksi/diterima berstatus default kosong (`""`) dan dibatasi maksimal hari ini (`max={todayJakarta()}`) beserta validasi error terstruktur di sisi UI.

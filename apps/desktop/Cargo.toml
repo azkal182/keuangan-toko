@@ -1,0 +1,12 @@
+[package]
+name = "toko-desktop"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
+chrono = "0.4"
+serde_json = "1"
+ureq = { version = "2", features = ["cookies", "json"] }
+uuid = { version = "1", features = ["v4"] }
