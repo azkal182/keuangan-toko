@@ -27,7 +27,7 @@ use ui::menu_bar::{
 };
 use ui::modal::ModalDialog;
 use ui::status_bar::StatusBar;
-use ui::theme::{Theme, format_accounting_rupiah, format_idr, format_rupiah};
+use ui::theme::{Theme, format_accounting_rupiah, format_rupiah};
 use ui::tool_bar::{
     accent_action_button, primary_action_button, render_toolbar_container, secondary_action_button,
     tool_separator,
@@ -2023,11 +2023,23 @@ impl Desktop {
                             .gap(px(6.0))
                             .child(
                                 div()
-                                    .w(px(250.0))
+                                    .w(px(260.0))
                                     .h(px(26.0))
                                     .bg(rgb(Theme::BG_CARD))
                                     .border_1()
-                                    .border_color(rgb(Theme::BORDER_STRONG))
+                                    .border_color(rgb(if !self.query.is_empty() {
+                                        Theme::FOCUS_BORDER
+                                    } else {
+                                        Theme::BORDER_STRONG
+                                    }))
+                                    .when(!self.query.is_empty(), |d| {
+                                        d.shadow(vec![gpui::BoxShadow {
+                                            color: gpui::rgba(0x2563EB33).into(),
+                                            offset: gpui::point(px(0.0), px(0.0)),
+                                            blur_radius: px(2.5),
+                                            spread_radius: px(1.5),
+                                        }])
+                                    })
                                     .rounded(px(3.0))
                                     .px(px(8.0))
                                     .flex()
@@ -2035,15 +2047,39 @@ impl Desktop {
                                     .justify_between()
                                     .child(if self.query.is_empty() {
                                         div()
-                                            .text_size(px(11.0))
-                                            .text_color(rgb(Theme::TEXT_LIGHT))
-                                            .child("Cari nama atau kode pelanggan...")
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(10.5))
+                                                    .text_color(rgb(Theme::TEXT_MUTED))
+                                                    .child("🔍"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(11.0))
+                                                    .text_color(rgb(Theme::TEXT_LIGHT))
+                                                    .child("Cari nama/kode (ketik langsung)..."),
+                                            )
                                     } else {
                                         div()
-                                            .text_size(px(11.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(rgb(Theme::TEXT_PRIMARY))
-                                            .child(self.query.clone())
+                                            .flex()
+                                            .items_center()
+                                            .child(
+                                                div()
+                                                    .text_size(px(11.0))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(Theme::PRIMARY))
+                                                    .child(self.query.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(2.0))
+                                                    .h(px(14.0))
+                                                    .bg(rgb(Theme::CURSOR_COLOR))
+                                                    .ml(px(1.5)),
+                                            )
                                     }),
                             )
                             .when(!self.query.is_empty(), |d| {
@@ -4449,32 +4485,29 @@ impl Desktop {
                                         .child(
                                             div()
                                                 .text_size(px(10.0))
-                                                .font_weight(FontWeight::BOLD)
-                                                .text_color(rgb(Theme::TEXT_SECONDARY))
-                                                .child(*label),
-                                        )
-                                        .child(
-                                            div()
-                                                .h(px(28.0))
-                                                .px(px(8.0))
-                                                .bg(rgb(0xFFFFFF))
-                                                .border_1()
-                                                .border_color(rgb(if is_focused {
+                                                .font_weight(if is_focused {
+                                                    FontWeight::BOLD
+                                                } else {
+                                                    FontWeight::SEMIBOLD
+                                                })
+                                                .text_color(rgb(if is_focused {
                                                     Theme::PRIMARY
                                                 } else {
-                                                    Theme::BORDER_STRONG
+                                                    Theme::TEXT_SECONDARY
                                                 }))
-                                                .rounded(px(3.0))
-                                                .flex()
-                                                .items_center()
-                                                .text_size(px(11.5))
-                                                .text_color(rgb(Theme::TEXT_PRIMARY))
-                                                .child(if val.is_empty() {
-                                                    "—".to_string()
-                                                } else {
-                                                    val.clone()
-                                                }),
+                                                .child(format!(
+                                                    "{}{}",
+                                                    *label,
+                                                    if is_focused { " ◀" } else { "" }
+                                                )),
                                         )
+                                        .child(self.render_native_text_box(
+                                            val,
+                                            "—",
+                                            is_focused,
+                                            false,
+                                            28.0,
+                                        ))
                                 },
                             )),
                     )
@@ -4561,34 +4594,18 @@ impl Desktop {
                                                 .id(("s-desc", r_idx))
                                                 .w(px(252.0))
                                                 .mr(px(8.0))
-                                                .h(px(24.0))
-                                                .px(px(6.0))
-                                                .bg(rgb(0xFFFFFF))
-                                                .border_1()
-                                                .border_color(rgb(if f_desc {
-                                                    Theme::PRIMARY
-                                                } else {
-                                                    Theme::BORDER_STRONG
-                                                }))
-                                                .rounded(px(2.0))
-                                                .flex()
-                                                .items_center()
                                                 .cursor_pointer()
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     this.sale_active_field = (r_idx, 0);
                                                     cx.notify();
                                                 }))
-                                                .text_size(px(11.5))
-                                                .text_color(rgb(if desc.is_empty() {
-                                                    Theme::TEXT_LIGHT
-                                                } else {
-                                                    Theme::TEXT_PRIMARY
-                                                }))
-                                                .child(if desc.is_empty() {
-                                                    "Ketik nama barang...".to_string()
-                                                } else {
-                                                    desc.clone()
-                                                }),
+                                                .child(self.render_native_text_box(
+                                                    desc,
+                                                    "Ketik nama barang...",
+                                                    f_desc,
+                                                    false,
+                                                    24.0,
+                                                )),
                                         )
                                         // Kolom Qty
                                         .child(
@@ -4596,27 +4613,18 @@ impl Desktop {
                                                 .id(("s-qty", r_idx))
                                                 .w(px(87.0))
                                                 .mr(px(8.0))
-                                                .h(px(24.0))
-                                                .px(px(6.0))
-                                                .bg(rgb(0xFFFFFF))
-                                                .border_1()
-                                                .border_color(rgb(if f_qty {
-                                                    Theme::PRIMARY
-                                                } else {
-                                                    Theme::BORDER_STRONG
-                                                }))
-                                                .rounded(px(2.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_end()
                                                 .cursor_pointer()
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     this.sale_active_field = (r_idx, 1);
                                                     cx.notify();
                                                 }))
-                                                .text_size(px(11.5))
-                                                .text_color(rgb(Theme::TEXT_PRIMARY))
-                                                .child(qty.clone()),
+                                                .child(self.render_native_text_box(
+                                                    qty,
+                                                    "1",
+                                                    f_qty,
+                                                    false,
+                                                    24.0,
+                                                )),
                                         )
                                         // Kolom Harga Satuan
                                         .child(
@@ -4624,35 +4632,22 @@ impl Desktop {
                                                 .id(("s-price", r_idx))
                                                 .w(px(122.0))
                                                 .mr(px(8.0))
-                                                .h(px(24.0))
-                                                .px(px(6.0))
-                                                .bg(rgb(0xFFFFFF))
-                                                .border_1()
-                                                .border_color(rgb(if f_price {
-                                                    Theme::PRIMARY
-                                                } else {
-                                                    Theme::BORDER_STRONG
-                                                }))
-                                                .rounded(px(2.0))
-                                                .flex()
-                                                .items_center()
-                                                .justify_end()
                                                 .cursor_pointer()
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     this.sale_active_field = (r_idx, 2);
                                                     cx.notify();
                                                 }))
-                                                .text_size(px(11.5))
-                                                .text_color(rgb(if price.is_empty() {
-                                                    Theme::TEXT_LIGHT
-                                                } else {
-                                                    Theme::TEXT_PRIMARY
-                                                }))
-                                                .child(if price.is_empty() {
-                                                    "0".to_string()
-                                                } else {
-                                                    format_idr(p_num)
-                                                }),
+                                                .child(self.render_native_text_box(
+                                                    if price.is_empty() {
+                                                        ""
+                                                    } else {
+                                                        price
+                                                    },
+                                                    "0",
+                                                    f_price,
+                                                    false,
+                                                    24.0,
+                                                )),
                                         )
                                         // Subtotal
                                         .child(
@@ -4861,40 +4856,29 @@ impl Desktop {
                                     .child(
                                         div()
                                             .text_size(px(11.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(Theme::TEXT_SECONDARY))
-                                            .child(*label),
-                                    )
-                                    .child(
-                                        div()
-                                            .h(px(30.0))
-                                            .px(px(8.0))
-                                            .bg(rgb(0xFFFFFF))
-                                            .border_1()
-                                            .border_color(rgb(if is_active {
+                                            .font_weight(if is_active {
+                                                FontWeight::BOLD
+                                            } else {
+                                                FontWeight::SEMIBOLD
+                                            })
+                                            .text_color(rgb(if is_active {
                                                 Theme::PRIMARY
                                             } else {
-                                                Theme::BORDER_STRONG
+                                                Theme::TEXT_SECONDARY
                                             }))
-                                            .rounded(px(3.0))
-                                            .flex()
-                                            .items_center()
-                                            .text_size(px(12.0))
-                                            .child(if val.is_empty() {
-                                                div()
-                                                    .text_color(rgb(Theme::TEXT_LIGHT))
-                                                    .child("Ketik nilai...")
-                                            } else if is_pw {
-                                                div()
-                                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                                    .child("•".repeat(val.len()))
-                                            } else {
-                                                div()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                                    .child(val.clone())
-                                            }),
+                                            .child(format!(
+                                                "{}{}",
+                                                *label,
+                                                if is_active { " ◀" } else { "" }
+                                            )),
                                     )
+                                    .child(self.render_native_text_box(
+                                        val,
+                                        "Ketik nilai...",
+                                        is_active,
+                                        is_pw,
+                                        30.0,
+                                    ))
                             }),
                     )
                     .when(!self.form_error.is_empty(), |d| {
@@ -4953,6 +4937,82 @@ impl Desktop {
                         this.submit_modal(cx);
                     })),
             )
+    }
+
+    /// Helper render input field bergaya native desktop dengan indikator Focus dan Kursor aktif yang jelas.
+    fn render_native_text_box(
+        &self,
+        value: &str,
+        placeholder: &str,
+        is_focused: bool,
+        is_password: bool,
+        height_px: f32,
+    ) -> Div {
+        let make_cursor = move || {
+            div()
+                .w(px(2.0))
+                .h(px((height_px - 10.0).max(12.0)))
+                .bg(rgb(Theme::CURSOR_COLOR))
+                .ml(px(1.0))
+        };
+
+        div()
+            .h(px(height_px))
+            .px(px(8.0))
+            .bg(rgb(if is_focused {
+                Theme::FOCUS_BG
+            } else {
+                0xFFFFFF
+            }))
+            .border_1()
+            .border_color(rgb(if is_focused {
+                Theme::FOCUS_BORDER
+            } else {
+                Theme::BORDER_STRONG
+            }))
+            .when(is_focused, |d| {
+                // Outline ring native yang kontras agar field fokus langsung terlihat mencolok
+                d.shadow(vec![gpui::BoxShadow {
+                    color: gpui::rgba(0x2563EB44).into(),
+                    offset: gpui::point(px(0.0), px(0.0)),
+                    blur_radius: px(3.0),
+                    spread_radius: px(2.0),
+                }])
+            })
+            .rounded(px(3.0))
+            .flex()
+            .items_center()
+            .text_size(px(12.0))
+            .child(if value.is_empty() {
+                div()
+                    .flex()
+                    .items_center()
+                    .when(is_focused, |d| d.child(make_cursor()))
+                    .child(
+                        div()
+                            .text_color(rgb(Theme::TEXT_LIGHT))
+                            .child(placeholder.to_string()),
+                    )
+            } else if is_password {
+                div()
+                    .flex()
+                    .items_center()
+                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                    .child("•".repeat(value.len()))
+                    .when(is_focused, |d| d.child(make_cursor()))
+            } else {
+                div()
+                    .flex()
+                    .items_center()
+                    .font_weight(if is_focused {
+                        FontWeight::SEMIBOLD
+                    } else {
+                        FontWeight::MEDIUM
+                    })
+                    .text_color(rgb(Theme::TEXT_PRIMARY))
+                    .child(value.to_string())
+                    .when(is_focused, |d| d.child(make_cursor()))
+            })
     }
 }
 

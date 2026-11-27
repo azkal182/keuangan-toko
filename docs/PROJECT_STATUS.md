@@ -171,3 +171,8 @@ Gunakan `.agents/skills/toko-project-status/SKILL.md`. Setiap pembaruan harus me
 - pps/desktop kini memakai HttpApiAdapter (ureq, cookie sesi, CSRF, Idempotency-Key) terhadap API /api/v1; default https://piutang.banza.web.id, ubah lewat TOKO_API_BASE_URL. TOKO_DESKTOP_ADAPTER=mock memakai data mock.
 - Cakupan: login/logout/ganti sandi, pelanggan, buku piutang, penjualan kredit, pembayaran, saldo kredit, realokasi, reversal, aging, pengguna. Import workbook tidak termasuk.
 - Batasan: panggilan HTTP memblokir thread UI (ada cache TTL); penjualan multi-item diposting per item seperti web (tidak atomik); alur terautentikasi belum diverifikasi terhadap API nyata (belum ada kredensial).
+
+## Desktop UI/UX: Focus & Cursor State Form Native (feat/desktop-native-mock)
+- Perbaikan UI/UX input form modal dan tabel transaksi agar memiliki visual focus state yang tegas dan kursor bar aktif.
+- Helper ender_native_text_box memberikan border kontras (Blue 600), glow focus ring (shadow), penanda label aktif (?), serta kursor bar berkedip/tegas pada input teks biasa, password, form penjualan kredit, dan kotak pencarian pelanggan.
+- Verifikasi: cargo clippy -p toko-desktop --offline -- -D warnings bersih, 16 unit test lulus, cargo build -p toko-desktop --offline berhasil.

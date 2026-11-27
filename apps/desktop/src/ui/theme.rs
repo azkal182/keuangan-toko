@@ -74,6 +74,12 @@ impl Theme {
     // Modal / Native Dialog Window Styling
     pub const MODAL_HEADER_BG: u32 = 0x1E293B; // Native window titlebar slate
     pub const MODAL_BORDER: u32 = 0x64748B;
+
+    // Focus & Input Ring
+    pub const FOCUS_BORDER: u32 = 0x2563EB; // Blue 600 - High contrast active border
+    pub const FOCUS_RING: u32 = 0xDBEAFE; // Blue 100 - Glow halo effect for focused field
+    pub const FOCUS_BG: u32 = 0xFFFFFF; // White crisp background
+    pub const CURSOR_COLOR: u32 = 0x1E40AF; // Blue 800 - Native blinking cursor bar
     pub const MODAL_BACKDROP: u32 = 0x0F172A;
 
     pub fn hsla(hex: u32) -> Hsla {
