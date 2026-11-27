@@ -166,3 +166,8 @@ Mulai `PH-08` untuk menyiapkan keamanan, operasi, backup/restore, observability,
 ## Cara memperbarui
 
 Gunakan `.agents/skills/toko-project-status/SKILL.md`. Setiap pembaruan harus membaca ulang keadaan repo dan menautkan bukti. Gunakan status `Belum mulai`, `Berjalan`, `Terblokir`, `Selesai`, `Ditunda`; fase `Selesai` memerlukan AC/exit gate terverifikasi. Pisahkan dokumen siap dari kode jadi, dan kode ada dari perilaku teruji.
+
+## Desktop: integrasi API (feat/desktop-native-mock)
+- pps/desktop kini memakai HttpApiAdapter (ureq, cookie sesi, CSRF, Idempotency-Key) terhadap API /api/v1; default https://piutang.banza.web.id, ubah lewat TOKO_API_BASE_URL. TOKO_DESKTOP_ADAPTER=mock memakai data mock.
+- Cakupan: login/logout/ganti sandi, pelanggan, buku piutang, penjualan kredit, pembayaran, saldo kredit, realokasi, reversal, aging, pengguna. Import workbook tidak termasuk.
+- Batasan: panggilan HTTP memblokir thread UI (ada cache TTL); penjualan multi-item diposting per item seperti web (tidak atomik); alur terautentikasi belum diverifikasi terhadap API nyata (belum ada kredensial).

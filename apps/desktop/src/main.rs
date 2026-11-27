@@ -111,18 +111,22 @@ pub struct Desktop {
 
 impl Desktop {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let store = Box::new(MockDataAdapter::new());
+        let store = build_store_from_env();
         let session = store.current_session();
         let today = Local::now().date_naive();
-        let first_cust_id = store
-            .list_customers(&CustomerQuery {
-                search: None,
-                active_only: false,
-            })
-            .first()
-            .map(|c| c.id.clone());
+        let first_cust_id = if session.is_some() {
+            store
+                .list_customers(&CustomerQuery {
+                    search: None,
+                    active_only: false,
+                })
+                .first()
+                .map(|c| c.id.clone())
+        } else {
+            None
+        };
 
-        Self {
+        let mut this = Self {
             store,
             session,
             current_view: CurrentView::CustomerList,
@@ -143,7 +147,11 @@ impl Desktop {
             aging_as_of: today,
             aging_selected_bucket: None,
             focus: cx.focus_handle(),
+        };
+        if this.session.is_none() {
+            this.open_login_modal();
         }
+        this
     }
 
     fn today_jakarta(&self) -> NaiveDate {
@@ -560,14 +568,27 @@ impl Desktop {
     }
 
     pub fn open_login_modal(&mut self) {
+        let sim = self.store.is_simulation();
         self.form_fields = vec![
             (
-                "Username (owner / operator_kasir / auditor_viewer)",
-                "owner".into(),
+                if sim {
+                    "Username (owner / operator_kasir / auditor_viewer)"
+                } else {
+                    "Nama Pengguna"
+                },
+                if sim { "owner".into() } else { String::new() },
             ),
             (
-                "Kata Sandi (default: password1234567)",
-                "password1234567".into(),
+                if sim {
+                    "Kata Sandi (default: password1234567)"
+                } else {
+                    "Kata Sandi"
+                },
+                if sim {
+                    "password1234567".into()
+                } else {
+                    String::new()
+                },
             ),
         ];
         self.form_active = 0;
@@ -1134,6 +1155,7 @@ impl Desktop {
                 self.active_modal = None;
             }
         }
+        self.session = self.store.current_session();
         cx.notify();
     }
 
@@ -1311,6 +1333,11 @@ impl Desktop {
                 self.status_msg = "Modul: Laporan Analisis Umur Piutang (Aging Report).".into();
                 cx.notify();
             }
+            "f9" => {
+                self.store.invalidate_cache();
+                self.status_msg = "Data dimuat ulang dari sumber (cache dibersihkan).".into();
+                cx.notify();
+            }
             "f8" => {
                 if self.is_owner() {
                     self.current_view = CurrentView::UserManagement;
@@ -1391,6 +1418,10 @@ impl Desktop {
 
 impl Render for Desktop {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(e) = self.store.take_last_error() {
+            self.status_msg = e;
+        }
+        let is_sim = self.store.is_simulation();
         let is_owner = self.is_owner();
         let must_change_pw = self
             .session
@@ -1500,7 +1531,11 @@ impl Render for Desktop {
                                 div()
                                     .text_size(px(10.5))
                                     .text_color(rgb(Theme::TEXT_MUTED))
-                                    .child("Simulasi Hak Akses:"),
+                                    .child(if is_sim {
+                                        "Simulasi Hak Akses:".to_string()
+                                    } else {
+                                        format!("Terhubung: {}", self.store.adapter_label())
+                                    }),
                             )
                             .child(self.render_role_switch_chip(
                                 "role-sw-owner",
@@ -1698,6 +1733,7 @@ impl Render for Desktop {
                     &date_label,
                     &user_display,
                 )
+                .adapter(self.store.adapter_label())
                 .render(),
             )
             // 4. MODAL DIALOGS OVERLAY
@@ -1720,6 +1756,7 @@ impl Desktop {
             .unwrap_or(false);
         div()
             .id(id)
+            .when(!self.store.is_simulation(), |d| d.hidden())
             .h(px(19.0))
             .px(px(7.0))
             .rounded(px(2.0))
@@ -4911,6 +4948,20 @@ impl Desktop {
                     })),
             )
     }
+}
+
+/// Pilih sumber data: API nyata (default) atau mock lokal (`TOKO_DESKTOP_ADAPTER=mock`).
+/// Base URL API dapat diubah lewat `TOKO_API_BASE_URL`.
+fn build_store_from_env() -> Box<dyn TokoStoreAdapter> {
+    let mode = std::env::var("TOKO_DESKTOP_ADAPTER")
+        .unwrap_or_default()
+        .to_lowercase();
+    if mode == "mock" {
+        return Box::new(MockDataAdapter::new());
+    }
+    let base = std::env::var("TOKO_API_BASE_URL")
+        .unwrap_or_else(|_| "https://piutang.banza.web.id".into());
+    Box::new(HttpApiAdapter::new(base))
 }
 
 fn main() {

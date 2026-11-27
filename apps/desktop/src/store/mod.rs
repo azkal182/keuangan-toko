@@ -5,7 +5,9 @@
 use chrono::NaiveDate;
 use std::fmt;
 
+pub mod api_store;
 pub mod mock_store;
+pub use api_store::HttpApiAdapter;
 pub use mock_store::MockDataAdapter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,6 +314,20 @@ impl std::error::Error for AppError {}
 /// Trait Adapter utama yang memisahkan presentasi UI dari sumber data.
 /// Diimplementasikan oleh `MockDataAdapter` sekarang, dan `HttpApiAdapter` / `SqliteAdapter` kelak.
 pub trait TokoStoreAdapter: Send + Sync {
+    // Metadata adapter
+    /// Label singkat sumber data untuk status bar.
+    fn adapter_label(&self) -> String;
+    /// `true` bila adapter hanya simulasi lokal (mock) sehingga simulasi peran tersedia.
+    fn is_simulation(&self) -> bool {
+        false
+    }
+    /// Buang cache baca agar data dimuat ulang dari sumber.
+    fn invalidate_cache(&self) {}
+    /// Ambil (dan hapus) galat baca terakhir yang tidak bisa dikembalikan lewat `Vec`.
+    fn take_last_error(&self) -> Option<String> {
+        None
+    }
+
     // Sesi & Pengguna
     fn current_session(&self) -> Option<SessionUser>;
     fn login(&mut self, username: &str, password: &str) -> Result<SessionUser, AppError>;

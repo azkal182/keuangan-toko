@@ -762,6 +762,14 @@ impl MockDataAdapter {
 }
 
 impl TokoStoreAdapter for MockDataAdapter {
+    fn adapter_label(&self) -> String {
+        "MockStore (In-Memory)".into()
+    }
+
+    fn is_simulation(&self) -> bool {
+        true
+    }
+
     fn current_session(&self) -> Option<SessionUser> {
         let user_id = self.current_user_id.as_ref()?;
         let u = self.users.iter().find(|user| &user.id == user_id)?;

@@ -9,6 +9,7 @@ pub struct StatusBar {
     pub active_module: String,
     pub business_date: String,
     pub user_label: String,
+    pub adapter_label: String,
 }
 
 impl StatusBar {
@@ -23,7 +24,13 @@ impl StatusBar {
             active_module: active_module.into(),
             business_date: business_date.into(),
             user_label: user_label.into(),
+            adapter_label: "—".into(),
         }
+    }
+
+    pub fn adapter(mut self, label: impl Into<String>) -> Self {
+        self.adapter_label = label.into();
+        self
     }
 
     pub fn render(self) -> Div {
@@ -78,7 +85,7 @@ impl StatusBar {
                             .border_l_1()
                             .border_color(rgb(0x334155))
                             .text_color(rgb(0xCBD5E1))
-                            .child("Adapter: MockStore (In-Memory)"),
+                            .child(format!("Adapter: {}", self.adapter_label)),
                     )
                     .child(
                         div()
