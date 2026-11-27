@@ -6,3 +6,10 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 publish = false
+
+# Optimasi maksimal (opt-level 3) tanpa memicu pipeline HLSL fxc compiler internal GPUI Windows
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 2
