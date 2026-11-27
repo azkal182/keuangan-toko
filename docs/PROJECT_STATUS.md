@@ -1,10 +1,14 @@
 # Status Proyek — Keuangan Toko
 
-**Diperbarui:** 26 November 2026
+**Diperbarui:** 27 November 2026
 **Repo kerja:** `D:\azka\keuangan-toko` — dipilih pengguna.
 **Sumber status:** bukti dokumen dan pemeriksaan filesystem/git; bukan klaim aplikasi berjalan.
 
 ## Ringkasan
+
+- **Penyelarasan Tie-Breaker FIFO Pembayaran & Form Input Tanggal (27 November 2026):**
+  1. Menyelaraskan urutan pengambilan debit terbuka (`OpenDebit`) pada alokasi pembayaran FIFO di `apps/api/src/payments.rs` dan `crates/domain/src/payment.rs` dengan menambahkan tie-breaker `source_order` (`ORDER BY 2 NULLS LAST, 3 NULLS LAST, 4, 1`). Hal ini menuntaskan anomali status pelunasan yang melompat acak pada baris transaksi di tanggal yang sama di buku piutang pelanggan. Lolos `cargo fmt`, `cargo clippy`, dan unit test `cargo test --workspace --locked` (8 tests lolos).
+  2. Memperbaiki formulir web pada Dialog Catat Belanja (`apps/web/src/components/record-sale-dialog.tsx`) dan Formulir Pembayaran (`apps/web/src/payments.tsx`) agar tanggal transaksi/diterima berstatus default kosong (`""`) dan dibatasi maksimal hari ini (`max={todayJakarta()}`) beserta validasi error terstruktur di sisi UI.
 
 - **Perbaikan Alokasi Kronologis FIFO Import (26 November 2026):** Mengatasi anomali alokasi pembayaran historis yang melompati transaksi lama akibat posisi baris fisik Excel yang tidak runtut tanggal. Pada `apps/api/src/imports.rs`, antrean komit kini diurutkan secara kronologis berdasarkan `(customer_id, effective_date, source_order)`. Transaksi nota lama selalu dilunasi terlebih dahulu, dan sisa pembayaran (deposit) mengalir menyerap transaksi berikutnya. Logika alokasi FIFO dipisahkan ke fungsi `prepare_legacy_allocations` dan divalidasi dengan unit test `imports::tests::sorts_and_allocates_legacy_fifo_chronologically_regardless_of_sheet_order`. Evaluasi formula dibatasi strictly pada Kolom F (Debet) bernilai > 0. Seluruh kode lolos `cargo fmt --all -- --check`, `cargo clippy --workspace --locked -- -D warnings`, dan `cargo test --workspace --locked` (7 unit tests lulus).
 

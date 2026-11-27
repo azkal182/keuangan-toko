@@ -4,6 +4,7 @@ use uuid::Uuid;
 pub struct OpenDebit {
     pub entry_id: Uuid,
     pub effective_date: Option<NaiveDate>,
+    pub source_order: Option<i64>,
     pub posted_at: chrono::DateTime<chrono::Utc>,
     pub amount_idr: i64,
     pub allocated_idr: i64,
@@ -28,6 +29,8 @@ pub fn allocate_fifo(amount_idr: i64, debits: &mut [OpenDebit]) -> Option<Vec<Al
         (
             debit.effective_date.is_none(),
             debit.effective_date,
+            debit.source_order.is_none(),
+            debit.source_order,
             debit.posted_at,
             debit.entry_id,
         )
@@ -62,6 +65,7 @@ mod tests {
             OpenDebit {
                 entry_id: second,
                 effective_date: NaiveDate::from_ymd_opt(2026, 1, 2),
+                source_order: None,
                 posted_at: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
                 amount_idr: 200000,
                 allocated_idr: 0,
@@ -69,6 +73,7 @@ mod tests {
             OpenDebit {
                 entry_id: first,
                 effective_date: NaiveDate::from_ymd_opt(2026, 1, 1),
+                source_order: None,
                 posted_at: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
                 amount_idr: 100000,
                 allocated_idr: 0,
@@ -83,5 +88,39 @@ mod tests {
             vec![(first, 100000), (second, 50000)]
         );
         assert_eq!(150000 - result.iter().map(|a| a.amount_idr).sum::<i64>(), 0);
+    }
+
+    #[test]
+    fn fifo_uses_source_order_tie_breaker_for_same_date() {
+        let entry_high_order = Uuid::from_u128(1); // Smaller UUID, but later source_order
+        let entry_low_order = Uuid::from_u128(2); // Larger UUID, but earlier source_order
+        let same_date = NaiveDate::from_ymd_opt(2026, 1, 1);
+        let same_time = chrono::DateTime::<chrono::Utc>::UNIX_EPOCH;
+
+        let mut debits = vec![
+            OpenDebit {
+                entry_id: entry_high_order,
+                effective_date: same_date,
+                source_order: Some(20),
+                posted_at: same_time,
+                amount_idr: 100000,
+                allocated_idr: 0,
+            },
+            OpenDebit {
+                entry_id: entry_low_order,
+                effective_date: same_date,
+                source_order: Some(5),
+                posted_at: same_time,
+                amount_idr: 100000,
+                allocated_idr: 0,
+            },
+        ];
+
+        let result = allocate_fifo(100000, &mut debits).unwrap();
+        // Even though entry_high_order has smaller UUID (1 vs 2), entry_low_order must be allocated first
+        // because source_order 5 < 20.
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].debit_entry_id, entry_low_order);
+        assert_eq!(result[0].amount_idr, 100000);
     }
 }

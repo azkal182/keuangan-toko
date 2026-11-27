@@ -207,11 +207,20 @@ function PaymentForm({
     const data: Schema["CreatePayment"] = {
       customer_id: customer.id,
       amount_idr: String(values.get("amount_idr")),
-      received_date: String(values.get("received_date")),
+      received_date: String(values.get("received_date") ?? "").trim(),
       method: String(values.get("method")) as Schema["PaymentMethod"],
       reference: String(values.get("reference")) || null,
       note: String(values.get("note")) || null,
     };
+    if (!data.received_date) {
+      setError(new ApiFailure("Tanggal diterima wajib diisi.", 422));
+      return;
+    }
+    const today = todayJakarta();
+    if (data.received_date > today) {
+      setError(new ApiFailure("Tanggal diterima tidak boleh melebihi tanggal hari ini.", 422));
+      return;
+    }
     if (!/^\d+$/.test(data.amount_idr) || BigInt(data.amount_idr) <= 0n) {
       setError(new ApiFailure("Nominal pembayaran harus berupa bilangan rupiah bulat lebih dari nol.", 422));
       return;
@@ -280,7 +289,7 @@ function PaymentForm({
                 name="received_date"
                 type="date"
                 max={todayJakarta()}
-                defaultValue={todayJakarta()}
+                defaultValue=""
                 required
                 className="text-xs"
               />

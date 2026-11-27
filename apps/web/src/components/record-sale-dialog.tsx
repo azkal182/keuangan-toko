@@ -43,7 +43,7 @@ export function RecordSaleDialog({
   onSuccess: (message: string) => void;
 }) {
   const today = useMemo(() => todayJakarta(), []);
-  const [effectiveDate, setEffectiveDate] = useState(today);
+  const [effectiveDate, setEffectiveDate] = useState("");
   const [items, setItems] = useState<SaleItemRow[]>([
     { key: crypto.randomUUID(), description: "", quantity: "1", unitPriceIdr: "" },
   ]);
@@ -79,6 +79,16 @@ export function RecordSaleDialog({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
+
+    if (!effectiveDate) {
+      setError(new ApiFailure("Tanggal transaksi wajib diisi."));
+      return;
+    }
+
+    if (effectiveDate > today) {
+      setError(new ApiFailure("Tanggal transaksi tidak boleh melebihi tanggal hari ini."));
+      return;
+    }
 
     const validItems = items.filter(
       (item) =>
@@ -140,7 +150,7 @@ export function RecordSaleDialog({
 
       // Reset form on success
       setItems([{ key: crypto.randomUUID(), description: "", quantity: "1", unitPriceIdr: "" }]);
-      setEffectiveDate(today);
+      setEffectiveDate("");
       onOpenChange(false);
       onSuccess(
         validItems.length === 1
@@ -169,11 +179,16 @@ export function RecordSaleDialog({
 
         {/* Transaction Date */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-emerald-800" />
-            <label htmlFor="sale-date" className="text-xs font-bold text-slate-800">
-              Tanggal Transaksi:
-            </label>
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-emerald-800" />
+              <label htmlFor="sale-date" className="text-xs font-bold text-slate-800">
+                Tanggal Transaksi: <span className="text-rose-600">*</span>
+              </label>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Wajib diisi dan tidak boleh melebihi tanggal hari ini.
+            </p>
           </div>
           <Input
             id="sale-date"

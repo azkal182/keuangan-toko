@@ -18,7 +18,14 @@ use toko_contracts::{
 use toko_domain::payment::{OpenDebit, allocate_fifo};
 use uuid::Uuid;
 
-type DebitRow = (Uuid, Option<NaiveDate>, DateTime<Utc>, i64, i64);
+type DebitRow = (
+    Uuid,
+    Option<NaiveDate>,
+    Option<i64>,
+    DateTime<Utc>,
+    i64,
+    i64,
+);
 type PaymentRow = (
     Uuid,
     i64,
@@ -63,7 +70,7 @@ pub async fn create(
         .await
         .map_err(|_| request.internal())?;
     let debits: Vec<DebitRow> = sqlx::query_as(
-        "SELECT e.id, e.effective_date, coalesce(s.posted_at,e.created_at), e.debit_idr,
+        "SELECT e.id, e.effective_date, e.source_order, coalesce(s.posted_at,e.created_at), e.debit_idr,
                 coalesce(a.allocated, 0)::bigint
          FROM receivable_entries e
          LEFT JOIN credit_sales s ON s.id = e.source_id AND e.entry_type = 'credit_sale'
@@ -77,7 +84,7 @@ pub async fn create(
            AND e.entry_type IN ('legacy_debit', 'credit_sale')
            AND (e.entry_type <> 'legacy_debit' OR NOT EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id=e.id))
            AND (e.entry_type = 'legacy_debit' OR s.status = 'posted')
-         ORDER BY 2 NULLS LAST, 3, 1",
+         ORDER BY 2 NULLS LAST, 3 NULLS LAST, 4, 1",
     )
     .bind(input.customer_id)
     .fetch_all(&mut *tx)
@@ -86,12 +93,15 @@ pub async fn create(
     let mut debits: Vec<OpenDebit> = debits
         .into_iter()
         .map(
-            |(entry_id, effective_date, posted_at, amount_idr, allocated_idr)| OpenDebit {
-                entry_id,
-                effective_date,
-                posted_at,
-                amount_idr,
-                allocated_idr,
+            |(entry_id, effective_date, source_order, posted_at, amount_idr, allocated_idr)| {
+                OpenDebit {
+                    entry_id,
+                    effective_date,
+                    source_order,
+                    posted_at,
+                    amount_idr,
+                    allocated_idr,
+                }
             },
         )
         .collect();
