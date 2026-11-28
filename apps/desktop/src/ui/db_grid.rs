@@ -7,6 +7,25 @@
 
 use crate::ui::theme::Theme;
 use gpui::{Div, FontWeight, SharedString, div, prelude::*, px, rgb};
+use gpui_kit::{base::Disableable, component::button::Button};
+
+/// A changed filter or customer can leave the previous page outside the new data set.
+pub fn bounded_page(page: usize, total: usize, page_size: usize) -> usize {
+    page.min(total.saturating_sub(1) / page_size.max(1))
+}
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::bounded_page;
+
+    #[test]
+    fn page_is_clamped_when_result_set_shrinks_or_becomes_empty() {
+        assert_eq!(bounded_page(2, 101, 50), 2);
+        assert_eq!(bounded_page(2, 51, 50), 1);
+        assert_eq!(bounded_page(2, 50, 50), 0);
+        assert_eq!(bounded_page(2, 0, 50), 0);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnAlign {
@@ -24,7 +43,7 @@ pub struct GridColumn {
 
 pub fn render_grid_header(columns: &[GridColumn]) -> Div {
     let mut header_row = div()
-        .h(px(28.0))
+        .h(px(34.0))
         .bg(rgb(Theme::BG_HEADER))
         .border_b_1()
         .border_color(rgb(Theme::BORDER_STRONG))
@@ -58,7 +77,7 @@ pub fn render_grid_header(columns: &[GridColumn]) -> Div {
             .px(px(7.0))
             .flex()
             .items_center()
-            .text_size(px(10.5))
+            .text_size(px(12.0))
             .font_weight(FontWeight::BOLD)
             .text_color(rgb(Theme::TEXT_SECONDARY));
 
@@ -270,6 +289,7 @@ where
     } else {
         total_items.div_ceil(page_size)
     };
+    let current_page = bounded_page(current_page, total_items, page_size);
     let page_display = current_page + 1;
     let has_prev = current_page > 0;
     let has_next = page_display < total_pages;
@@ -282,7 +302,8 @@ where
     let end_idx = (start_idx + page_size - 1).min(total_items);
 
     div()
-        .h(px(30.0))
+        .h(px(42.0))
+        .flex_shrink_0()
         .bg(rgb(Theme::BG_HEADER))
         .border_t_1()
         .border_color(rgb(Theme::BORDER_STRONG))
@@ -308,32 +329,11 @@ where
                 .items_center()
                 .gap(px(6.0))
                 .child(
-                    div()
-                        .id(prev_id)
-                        .h(px(22.0))
-                        .px(px(8.0))
-                        .bg(rgb(if has_prev { 0xFFFFFF } else { 0xF1F5F9 }))
-                        .border_1()
-                        .border_color(rgb(if has_prev {
-                            Theme::BORDER_DEFAULT
-                        } else {
-                            Theme::BORDER_LIGHT
-                        }))
-                        .rounded(px(2.0))
-                        .flex()
-                        .items_center()
-                        .when(has_prev, |d| d.cursor_pointer().on_click(on_prev))
-                        .child(
-                            div()
-                                .text_size(px(10.5))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(if has_prev {
-                                    Theme::TEXT_PRIMARY
-                                } else {
-                                    Theme::TEXT_LIGHT
-                                }))
-                                .child("◀ Sebelumnya"),
-                        ),
+                    Button::new(prev_id)
+                        .outline()
+                        .label("Sebelumnya")
+                        .disabled(!has_prev)
+                        .on_click(on_prev),
                 )
                 .child(
                     div()
@@ -344,32 +344,11 @@ where
                         .child(format!("Hal. {} / {}", page_display, total_pages)),
                 )
                 .child(
-                    div()
-                        .id(next_id)
-                        .h(px(22.0))
-                        .px(px(8.0))
-                        .bg(rgb(if has_next { 0xFFFFFF } else { 0xF1F5F9 }))
-                        .border_1()
-                        .border_color(rgb(if has_next {
-                            Theme::BORDER_DEFAULT
-                        } else {
-                            Theme::BORDER_LIGHT
-                        }))
-                        .rounded(px(2.0))
-                        .flex()
-                        .items_center()
-                        .when(has_next, |d| d.cursor_pointer().on_click(on_next))
-                        .child(
-                            div()
-                                .text_size(px(10.5))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(if has_next {
-                                    Theme::TEXT_PRIMARY
-                                } else {
-                                    Theme::TEXT_LIGHT
-                                }))
-                                .child("Berikutnya ▶"),
-                        ),
+                    Button::new(next_id)
+                        .outline()
+                        .label("Berikutnya")
+                        .disabled(!has_next)
+                        .on_click(on_next),
                 ),
         )
 }

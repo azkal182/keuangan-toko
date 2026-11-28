@@ -1,0 +1,11 @@
+mod accounts;
+mod aging;
+pub(crate) mod aging_table;
+mod customer_detail;
+pub(crate) mod customer_table;
+mod customers;
+pub(crate) mod detail_data;
+pub(crate) mod detail_tables;
+mod dialogs;
+mod ledger;
+mod payments;

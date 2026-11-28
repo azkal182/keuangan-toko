@@ -9,7 +9,7 @@ use gpui::{Div, FontWeight, div, prelude::*, px, rgb};
 /// Baris Menu Sistem Native (26px) di puncak jendela aplikasi
 pub fn render_system_menu_bar() -> Div {
     div()
-        .h(px(26.0))
+        .h(px(34.0))
         .bg(rgb(Theme::BG_SYSTEM_MENU))
         .border_b_1()
         .border_color(rgb(Theme::BORDER_DEFAULT))
@@ -22,7 +22,7 @@ pub fn render_system_menu_bar() -> Div {
 /// Item teks pada System Menu Bar (contoh: `Berkas`, `Navigasi`, `Akun`)
 pub fn system_menu_item(label: &'static str, shortcut: &'static str, is_active: bool) -> Div {
     div()
-        .h(px(20.0))
+        .h(px(26.0))
         .px(px(7.0))
         .rounded(px(2.0))
         .bg(rgb(if is_active {
@@ -37,7 +37,7 @@ pub fn system_menu_item(label: &'static str, shortcut: &'static str, is_active: 
         .hover(|d| d.bg(rgb(0xCBD5E1)))
         .child(
             div()
-                .text_size(px(11.0))
+                .text_size(px(12.0))
                 .font_weight(if is_active {
                     FontWeight::BOLD
                 } else {
@@ -90,10 +90,10 @@ pub fn sidebar_nav_item(
     is_active: bool,
 ) -> Div {
     div()
-        .h(px(28.0))
+        .h(px(36.0))
         .mx(px(6.0))
         .px(px(8.0))
-        .rounded(px(3.0))
+        .rounded(px(6.0))
         .bg(rgb(if is_active {
             Theme::BG_SIDEBAR_ACTIVE
         } else {
@@ -117,7 +117,7 @@ pub fn sidebar_nav_item(
                 .gap(px(7.0))
                 .child(
                     div()
-                        .text_size(px(11.5))
+                        .text_size(px(13.0))
                         .text_color(rgb(if is_active {
                             Theme::PRIMARY
                         } else {
@@ -127,7 +127,7 @@ pub fn sidebar_nav_item(
                 )
                 .child(
                     div()
-                        .text_size(px(11.5))
+                        .text_size(px(13.0))
                         .font_weight(if is_active {
                             FontWeight::BOLD
                         } else {

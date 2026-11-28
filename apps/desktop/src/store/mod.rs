@@ -314,6 +314,8 @@ impl std::error::Error for AppError {}
 /// Trait Adapter utama yang memisahkan presentasi UI dari sumber data.
 /// Diimplementasikan oleh `MockDataAdapter` sekarang, dan `HttpApiAdapter` / `SqliteAdapter` kelak.
 pub trait TokoStoreAdapter: Send + Sync {
+    /// A reader usable on a background worker; shares the HTTP session.
+    fn background_reader(&self) -> Box<dyn TokoStoreAdapter>;
     // Metadata adapter
     /// Label singkat sumber data untuk status bar.
     fn adapter_label(&self) -> String;
@@ -342,6 +344,12 @@ pub trait TokoStoreAdapter: Send + Sync {
 
     // Pelanggan (API-101..104, API-107)
     fn list_customers(&self, query: &CustomerQuery) -> Vec<CustomerSummary>;
+    fn list_customers_result(
+        &self,
+        query: &CustomerQuery,
+    ) -> Result<Vec<CustomerSummary>, AppError> {
+        Ok(self.list_customers(query))
+    }
     fn get_customer(&self, id: &str) -> Result<CustomerDetail, AppError>;
     fn create_customer(&mut self, input: &CreateCustomerInput) -> Result<CustomerDetail, AppError>;
     fn update_customer(

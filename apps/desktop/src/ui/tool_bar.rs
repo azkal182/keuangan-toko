@@ -7,7 +7,7 @@ use gpui::{Div, FontWeight, div, prelude::*, px, rgb};
 
 pub fn render_toolbar_container() -> Div {
     div()
-        .h(px(38.0))
+        .h(px(48.0))
         .bg(rgb(Theme::BG_TOOLBAR))
         .border_b_1()
         .border_color(rgb(Theme::BORDER_DEFAULT))

@@ -13,7 +13,7 @@ use super::*;
 use serde_json::{Value, json};
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -34,6 +34,7 @@ const AGING_KEYS: [&str; 7] = [
 struct ApiSession {
     user: SessionUser,
     csrf: String,
+    generation: Uuid,
 }
 
 /// Parse respons `GET /auth/me` menjadi pengguna + token CSRF.
@@ -55,12 +56,13 @@ fn parse_me(resp: &Value) -> Option<(SessionUser, String)> {
 
 type CacheMap = HashMap<String, (Instant, Box<dyn Any + Send>)>;
 
+#[derive(Clone)]
 pub struct HttpApiAdapter {
     base_url: String,
     agent: ureq::Agent,
-    session: Mutex<Option<ApiSession>>,
-    cache: Mutex<CacheMap>,
-    last_error: Mutex<Option<String>>,
+    session: Arc<Mutex<Option<ApiSession>>>,
+    cache: Arc<Mutex<CacheMap>>,
+    last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl HttpApiAdapter {
@@ -73,9 +75,9 @@ impl HttpApiAdapter {
         Self {
             base_url,
             agent,
-            session: Mutex::new(None),
-            cache: Mutex::new(HashMap::new()),
-            last_error: Mutex::new(None),
+            session: Arc::new(Mutex::new(None)),
+            cache: Arc::new(Mutex::new(HashMap::new())),
+            last_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -107,7 +109,7 @@ impl HttpApiAdapter {
         res
     }
 
-    fn api_error(&self, status: u16, body: &Value) -> AppError {
+    fn api_error(&self, status: u16, body: &Value, request_session: Option<Uuid>) -> AppError {
         let err = &body["error"];
         let mut msg = err["message"]
             .as_str()
@@ -121,8 +123,14 @@ impl HttpApiAdapter {
             }
         }
         if status == 401 {
-            *self.session.lock().unwrap() = None;
-            self.clear_cache();
+            let mut current = self.session.lock().unwrap();
+            if request_session.is_some()
+                && current.as_ref().map(|s| s.generation) == request_session
+            {
+                *current = None;
+                drop(current);
+                self.clear_cache();
+            }
         }
         AppError(msg)
     }
@@ -136,6 +144,7 @@ impl HttpApiAdapter {
         mutating: bool,
     ) -> Result<Value, AppError> {
         let url = format!("{}{}", self.base_url, path);
+        let request_session = self.session.lock().unwrap().as_ref().map(|s| s.generation);
         let mut req = self
             .agent
             .request(method, &url)
@@ -172,7 +181,7 @@ impl HttpApiAdapter {
                     .ok()
                     .and_then(|t| serde_json::from_str::<Value>(&t).ok())
                     .unwrap_or(Value::Null);
-                Err(self.api_error(code, &v))
+                Err(self.api_error(code, &v, request_session))
             }
             Err(ureq::Error::Transport(t)) => Err(AppError(format!(
                 "Tidak dapat terhubung ke server ({}): {}",
@@ -391,6 +400,9 @@ fn opt_json(s: &Option<String>) -> Value {
 }
 
 impl TokoStoreAdapter for HttpApiAdapter {
+    fn background_reader(&self) -> Box<dyn TokoStoreAdapter> {
+        Box::new(self.clone())
+    }
     fn adapter_label(&self) -> String {
         format!(
             "API {}",
@@ -437,6 +449,7 @@ impl TokoStoreAdapter for HttpApiAdapter {
                 *self.session.lock().unwrap() = Some(ApiSession {
                     user: user.clone(),
                     csrf,
+                    generation: Uuid::new_v4(),
                 });
                 Some(user)
             }
@@ -471,6 +484,7 @@ impl TokoStoreAdapter for HttpApiAdapter {
         *self.session.lock().unwrap() = Some(ApiSession {
             user: user.clone(),
             csrf,
+            generation: Uuid::new_v4(),
         });
         self.clear_cache();
         Ok(user)
@@ -502,22 +516,31 @@ impl TokoStoreAdapter for HttpApiAdapter {
     // ----- Pelanggan -----
 
     fn list_customers(&self, query: &CustomerQuery) -> Vec<CustomerSummary> {
-        let all = self
-            .cached("customers".into(), || {
-                let pages = self.fetch_pages("/api/v1/customers", &[])?;
-                let mut out = Vec::new();
-                for p in &pages {
-                    if let Some(items) = p["data"]["items"].as_array() {
-                        out.extend(items.iter().filter_map(parse_summary));
-                    }
+        self.list_customers_result(query).unwrap_or_else(|error| {
+            *self.last_error.lock().unwrap() = Some(error.0);
+            Vec::new()
+        })
+    }
+
+    fn list_customers_result(
+        &self,
+        query: &CustomerQuery,
+    ) -> Result<Vec<CustomerSummary>, AppError> {
+        let all = self.cached("customers".into(), || {
+            let pages = self.fetch_pages("/api/v1/customers", &[])?;
+            let mut out = Vec::new();
+            for p in &pages {
+                if let Some(items) = p["data"]["items"].as_array() {
+                    out.extend(items.iter().filter_map(parse_summary));
                 }
-                out.sort_by_key(|a| a.name.to_lowercase());
-                Ok(out)
-            })
-            .unwrap_or_default();
+            }
+            out.sort_by_key(|a| a.name.to_lowercase());
+            Ok(out)
+        })?;
 
         let term = query.search.as_deref().unwrap_or("").trim().to_lowercase();
-        all.into_iter()
+        Ok(all
+            .into_iter()
             .filter(|c| !query.active_only || c.is_active)
             .filter(|c| {
                 term.is_empty()
@@ -531,7 +554,7 @@ impl TokoStoreAdapter for HttpApiAdapter {
                         .map(|x| x.to_lowercase().contains(&term))
                         .unwrap_or(false)
             })
-            .collect()
+            .collect())
     }
 
     fn get_customer(&self, id: &str) -> Result<CustomerDetail, AppError> {
@@ -859,10 +882,10 @@ impl TokoStoreAdapter for HttpApiAdapter {
             let q = vec![("as_of", as_of.to_string())];
             let summary = self.get("/api/v1/reports/receivables-aging", &q)?["data"].clone();
             let meta: HashMap<String, (Option<String>, bool)> = self
-                .list_customers(&CustomerQuery {
+                .list_customers_result(&CustomerQuery {
                     search: None,
                     active_only: false,
-                })
+                })?
                 .into_iter()
                 .map(|c| (c.id, (c.code, c.is_active)))
                 .collect();
@@ -988,6 +1011,87 @@ impl TokoStoreAdapter for HttpApiAdapter {
 
 #[cfg(test)]
 mod tests {
+    // Opt-in only: this creates a clearly marked synthetic customer and real test
+    // transactions on the specified server. Never run against production.
+    #[test]
+    #[ignore = "requires a disposable test server and creates persistent test data"]
+    fn live_synthetic_customer_sale_and_payment() {
+        use super::*;
+
+        let url = std::env::var("TOKO_TEST_API_URL").expect("set TOKO_TEST_API_URL");
+        let username = std::env::var("TOKO_TEST_USERNAME").expect("set TOKO_TEST_USERNAME");
+        let password = std::env::var("TOKO_TEST_PASSWORD").expect("set TOKO_TEST_PASSWORD");
+        let mut api = HttpApiAdapter::new(url);
+        api.login(&username, &password).expect("login failed");
+        let customer = api
+            .create_customer(&CreateCustomerInput {
+                code: Some(format!(
+                    "TEST-{}",
+                    &Uuid::new_v4().simple().to_string()[..8]
+                )),
+                name: "UJI SINTETIS DESKTOP - BUKAN PELANGGAN".into(),
+                address: None,
+            })
+            .expect("create synthetic customer failed");
+        let today = chrono::Local::now().date_naive();
+        let total = api
+            .create_instant_sale(
+                &customer.id,
+                &InstantSaleInput {
+                    effective_date: today,
+                    reference_no: Some("UJI SINTETIS DESKTOP".into()),
+                    backdate_reason: None,
+                    items: vec![SaleItemInput {
+                        description: "Barang uji sintetis".into(),
+                        quantity: "1".into(),
+                        unit_price_idr: 5000,
+                    }],
+                },
+            )
+            .expect("create test sale failed");
+        assert_eq!(total, 5000);
+        let payment = api
+            .record_payment(
+                &customer.id,
+                &RecordPaymentInput {
+                    received_date: today,
+                    amount_idr: 1000,
+                    method: "cash".into(),
+                    reference: Some("UJI SINTETIS DESKTOP".into()),
+                    note: Some("Transaksi uji".into()),
+                },
+            )
+            .expect("create test payment failed");
+        assert_eq!(payment.amount_idr, 1000);
+        let ledger = api
+            .get_ledger(
+                &customer.id,
+                &LedgerQuery {
+                    from: None,
+                    to: None,
+                    order_desc: false,
+                },
+            )
+            .expect("read synthetic ledger failed");
+        assert_eq!(ledger.summary.outstanding_idr, 4000);
+        assert_eq!(
+            ledger
+                .entries
+                .iter()
+                .map(|entry| entry.debit_idr)
+                .sum::<i64>(),
+            5000
+        );
+        assert_eq!(
+            ledger
+                .entries
+                .iter()
+                .map(|entry| entry.credit_idr)
+                .sum::<i64>(),
+            1000
+        );
+        api.logout();
+    }
     use super::*;
 
     #[test]
@@ -1048,12 +1152,36 @@ mod tests {
                 must_change_password: false,
             },
             csrf: "t".into(),
+            generation: Uuid::nil(),
         });
         let err = a.api_error(
             401,
             &json!({"error":{"code":"UNAUTHENTICATED","message":"Sesi tidak aktif","fields":{"name":"Wajib diisi"}}}),
+            Some(Uuid::nil()),
         );
         assert!(err.0.contains("Sesi tidak aktif") && err.0.contains("name: Wajib diisi"));
+        assert!(a.current_session().is_none());
+    }
+
+    #[test]
+    fn stale_unauthorized_response_does_not_clear_new_session() {
+        let a = HttpApiAdapter::new("https://example.invalid");
+        let new_generation = Uuid::new_v4();
+        *a.session.lock().unwrap() = Some(ApiSession {
+            user: SessionUser {
+                id: "new".into(),
+                username: "owner".into(),
+                role: UserRole::Owner,
+                must_change_password: false,
+            },
+            csrf: "new-token".into(),
+            generation: new_generation,
+        });
+        a.api_error(401, &json!({}), Some(Uuid::new_v4()));
+        assert_eq!(a.current_session().unwrap().id, "new");
+        a.api_error(401, &json!({}), None);
+        assert_eq!(a.current_session().unwrap().id, "new");
+        a.api_error(401, &json!({}), Some(new_generation));
         assert!(a.current_session().is_none());
     }
 

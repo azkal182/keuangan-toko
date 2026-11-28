@@ -11,13 +11,13 @@ pub struct Theme;
 
 impl Theme {
     // Native Window & Panel Surfaces
-    pub const BG_SYSTEM_MENU: u32 = 0xE2E8F0; // Baris menu sistem paling atas (Slate 200)
-    pub const BG_SIDEBAR: u32 = 0xF1F5F9; // Panel navigasi kiri (Slate 100)
+    pub const BG_SYSTEM_MENU: u32 = 0xFAFAFA;
+    pub const BG_SIDEBAR: u32 = 0xFAFAFA;
     pub const BG_SIDEBAR_ACTIVE: u32 = 0xDBEAFE; // Item navigasi aktif (Blue 100)
     pub const BG_TOOLBAR: u32 = 0xF8FAFC; // Command bar kontekstual per halaman
-    pub const BG_APP: u32 = 0xE5E7EB; // Latar workspace desktop
+    pub const BG_APP: u32 = 0xF7F8FA;
     pub const BG_CARD: u32 = 0xFFFFFF; // Permukaan DBGrid & panel data
-    pub const BG_HEADER: u32 = 0xF1F5F9; // Header kolom DBGrid native
+    pub const BG_HEADER: u32 = 0xFAFAFA;
     pub const BG_ROW_ALT: u32 = 0xF8FAFC; // Zebra striping DBGrid
     pub const BG_ROW_HOVER: u32 = 0xEFF6FF; // Hover baris DBGrid
     pub const BG_ROW_SELECTED: u32 = 0xDBEAFE; // Seleksi baris DBGrid aktif
@@ -25,7 +25,7 @@ impl Theme {
 
     // Borders & Gridlines (Tegas selayaknya aplikasi desktop native)
     pub const BORDER_LIGHT: u32 = 0xE2E8F0;
-    pub const BORDER_DEFAULT: u32 = 0xCBD5E1; // Border panel & tombol toolbar native
+    pub const BORDER_DEFAULT: u32 = 0xE5E7EB;
     pub const BORDER_STRONG: u32 = 0x94A3B8; // Border input & frame aktif
     pub const GRID_LINE: u32 = 0xE2E8F0; // Garis sel vertikal/horizontal DBGrid
 
