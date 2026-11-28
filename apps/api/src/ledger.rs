@@ -260,7 +260,10 @@ pub async fn export_bill_pdf(
             .bind(id)
             .fetch_optional(&mut *tx)
             .await
-            .map_err(|_| request.internal())?;
+            .map_err(|error| {
+                eprintln!("export_bill_pdf customer query error: {error:?}");
+                request.internal()
+            })?;
 
     let (customer_name, customer_code, customer_address) = match customer {
         Some(c) => c,
@@ -273,9 +276,9 @@ pub async fn export_bill_pdf(
                     e.debit_idr,
                     coalesce(e.description, item.description, s.reference_no, 'Penjualan') AS description,
                     coalesce(e.quantity, item.quantity::text) AS quantity,
-                    coalesce(e.unit_price_idr, item.unit_price_idr) AS unit_price_idr,
-                    coalesce(debit_alloc.amount, 0) AS allocated_idr,
-                    (e.debit_idr - coalesce(debit_alloc.amount, 0)) AS remaining_idr
+                    coalesce(e.unit_price_idr, item.unit_price_idr)::bigint AS unit_price_idr,
+                    coalesce(debit_alloc.amount, 0)::bigint AS allocated_idr,
+                    greatest(e.debit_idr::numeric - coalesce(debit_alloc.amount, 0), 0)::bigint AS remaining_idr
              FROM receivable_entries e
              LEFT JOIN credit_sales s ON s.id = e.source_id AND s.customer_id = $1 AND e.entry_type = 'credit_sale'
              LEFT JOIN LATERAL (
@@ -305,7 +308,10 @@ pub async fn export_bill_pdf(
     .bind(query.to)
     .fetch_all(&mut *tx)
     .await
-    .map_err(|_| request.internal())?;
+    .map_err(|error| {
+        eprintln!("export_bill_pdf database error: {error:?}");
+        request.internal()
+    })?;
 
     tx.commit().await.map_err(|_| request.internal())?;
 
