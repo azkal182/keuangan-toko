@@ -255,13 +255,12 @@ pub async fn export_bill_pdf(
         ));
     }
     let mut tx = snapshot(&pool, request).await?;
-    let customer: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT name, code, address FROM customers WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(|_| request.internal())?;
+    let customer: Option<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT name, code, address FROM customers WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|_| request.internal())?;
 
     let (customer_name, customer_code, customer_address) = match customer {
         Some(c) => c,
