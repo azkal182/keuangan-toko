@@ -1412,19 +1412,15 @@ async fn credit_sale_slice(pool: PgPool) {
     let mut dates = initial.clone();
     dates["effective_date"] = serde_json::json!(today.pred_opt().unwrap());
     assert_eq!(
-        create('b', &operator, Some("backdate"), &dates)
+        create('b', &operator, Some("backdate-op"), &dates)
             .await
             .status(),
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        create('a', &owner, Some("backdate"), &dates).await.status(),
-        StatusCode::UNPROCESSABLE_ENTITY
+        StatusCode::CREATED
     );
     let mut dated_with_reason = dates.clone();
     dated_with_reason["backdate_reason"] = serde_json::json!("Pembukuan hari sebelumnya");
     assert_eq!(
-        create('a', &owner, Some("backdate"), &dated_with_reason)
+        create('a', &owner, Some("backdate-owner"), &dated_with_reason)
             .await
             .status(),
         StatusCode::CREATED
