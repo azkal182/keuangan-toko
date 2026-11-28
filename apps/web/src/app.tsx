@@ -29,8 +29,8 @@ export function App() {
             <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-white/10 backdrop-blur-sm shadow-inner ring-1 ring-white/20 mb-3">
               <Store className="h-7 w-7 text-white" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight">Keuangan Toko</h1>
-            <p className="text-xs text-emerald-100/80 mt-1">Sistem Pengelolaan Piutang & Pembayaran Toko</p>
+            <h1 className="text-xl font-bold tracking-tight">Piutang Reza Putra</h1>
+            <p className="text-xs text-emerald-100/80 mt-1">Sistem Pengelolaan Piutang & Pembayaran Pelanggan</p>
           </div>
 
           <CardHeader className="pt-6 pb-2 text-center">

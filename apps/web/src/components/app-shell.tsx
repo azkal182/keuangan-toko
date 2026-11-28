@@ -97,7 +97,7 @@ export function AppShell({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 text-sm tracking-tight">Keuangan Toko</span>
+                <span className="font-bold text-slate-900 text-sm tracking-tight">Piutang Reza Putra</span>
                 <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
                   Web
                 </span>
@@ -269,7 +269,7 @@ export function AppShell({
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-200 bg-white py-4 px-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>&copy; {new Date().getFullYear()} Keuangan Toko — Sistem Pencatatan Keuangan & Piutang Toko</span>
+          <span>&copy; {new Date().getFullYear()} Piutang Reza Putra — Sistem Pencatatan & Piutang Pelanggan</span>
           <span className="font-mono text-[11px] text-slate-400">PostgreSQL · Axum · React</span>
         </div>
       </footer>

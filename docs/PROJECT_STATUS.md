@@ -6,6 +6,11 @@
 
 ## Ringkasan
 
+- **Penyempurnaan Layout PDF & Rebranding Web "Piutang Reza Putra" (28 November 2026):**
+  - Rebalancing lebar kolom tabel PDF: Kolom Uraian Transaksi dirapikan (125 pt) dan batas pemotongan teks disesuaikan (26 karakter) agar kolom Saldo Berjalan (Rp) memiliki ruang lega (130 pt) dan tidak terpotong di tepi kanan halaman.
+  - Rebranding aplikasi: Nama resmi pada antarmuka Web (`index.html`, `app.tsx`, `app-shell.tsx`, `presentation.tsx`) dan header dokumen PDF diselaraskan menjadi **Piutang Reza Putra** mengikuti penamaan desktop.
+  - Perbaikan query integrasi PostgreSQL: Explicit cast `::bigint` pada kalkulasi saldo terserap dan sisa tagihan untuk mencegah decode error pada driver PostgreSQL.
+
 - **Fitur Ekspor / Cetak PDF Rincian Tagihan Piutang (Backend & Web) (28 November 2026):**
   - Implementasi pure-Rust generator PDF 1.4 (`apps/api/src/pdf.rs`) tanpa dependensi pustaka C eksternal atau network, standar A4 portrait dengan font bawaan PDF (`/Helvetica` dan `/Helvetica-Bold`).
   - Endpoint `GET /api/v1/customers/{id}/ledger/export-pdf` (`API-108`) menyaring hanya transaksi piutang belanja yang belum lunas atau terbayar sebagian (`remaining_idr > 0`), mendukung filter tanggal opsional `from` dan `to`.

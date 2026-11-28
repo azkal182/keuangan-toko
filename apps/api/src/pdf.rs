@@ -58,17 +58,17 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
     let margin_left = 28.0_f32;
     let margin_right = 567.0_f32; // lebar tabel = 539 pt
 
-    // Kolom tabel: No (22), Tanggal (58), Uraian (165), Qty (32), Harga (62), Debet (66), Kredit (66), Sisa (68) = 539 pt
+    // Kolom tabel: No (20), Tanggal (52), Uraian (125), Qty (28), Harga (56), Debet (64), Kredit (64), Saldo Berjalan (130) = 539 pt
     let col_x = [
-        margin_left,         // No: 28
-        margin_left + 22.0,  // Tanggal: 50
-        margin_left + 80.0,  // Uraian: 108
-        margin_left + 245.0, // Qty: 273
-        margin_left + 277.0, // Harga: 305
-        margin_left + 339.0, // Debet: 367
-        margin_left + 405.0, // Kredit: 433
-        margin_left + 471.0, // Sisa: 499
-        margin_right,        // Ujung kanan: 567
+        margin_left,         // No: 28.0 (lebar 20)
+        margin_left + 20.0,  // Tanggal: 48.0 (lebar 52)
+        margin_left + 72.0,  // Uraian: 100.0 (lebar 125)
+        margin_left + 197.0, // Qty: 225.0 (lebar 28)
+        margin_left + 225.0, // Harga: 253.0 (lebar 56)
+        margin_left + 281.0, // Debet: 309.0 (lebar 64)
+        margin_left + 345.0, // Kredit: 373.0 (lebar 64)
+        margin_left + 409.0, // Saldo Berjalan: 437.0 (lebar 130 s/d 567.0)
+        margin_right,        // Ujung kanan: 567.0
     ];
 
     let row_height = 18.0_f32;
@@ -86,7 +86,7 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
         stream.push_str("0.05 0.1 0.2 rg\n"); // Slate gelap
         stream.push_str("BT /F2 15 Tf ");
         stream.push_str(&format!(
-            "{:.2} {:.2} Td (KEUANGAN TOKO - REZA PUTRA) Tj ET\n",
+            "{:.2} {:.2} Td (PIUTANG REZA PUTRA) Tj ET\n",
             margin_left, *y
         ));
         *y -= 14.0;
@@ -188,7 +188,7 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
         let th_y = *y + 6.0;
 
         // No
-        stream.push_str(&format!("{:.2} {:.2} Td (No) Tj\n", col_x[0] + 5.0, th_y));
+        stream.push_str(&format!("{:.2} {:.2} Td (No) Tj\n", col_x[0] + 4.0, th_y));
         // Tanggal
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Tanggal) Tj\n",
@@ -210,25 +210,25 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
         // Harga Satuan
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Harga Satuan) Tj\n",
-            col_x[4] + 4.0,
+            col_x[4] + 3.0,
             th_y
         ));
         // Debet (Rp)
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Debet \\(Rp\\)) Tj\n",
-            col_x[5] + 6.0,
+            col_x[5] + 4.0,
             th_y
         ));
         // Kredit (Rp)
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Kredit \\(Rp\\)) Tj\n",
-            col_x[6] + 6.0,
+            col_x[6] + 4.0,
             th_y
         ));
         // Saldo Berjalan (Rp)
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Saldo Berjalan \\(Rp\\)) Tj\n",
-            col_x[7] + 4.0,
+            col_x[7] + 6.0,
             th_y
         ));
 
@@ -271,7 +271,7 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
                 // Sub-header halaman lanjutan
                 current_page_stream.push_str("0.3 0.35 0.4 rg BT /F2 9 Tf ");
                 current_page_stream.push_str(&format!(
-                    "{:.2} {:.2} Td (RINCIAN TAGIHAN PIUTANG - {} \\(Lanjutan\\)) Tj ET\n",
+                    "{:.2} {:.2} Td (PIUTANG REZA PUTRA - RINCIAN TAGIHAN {} \\(Lanjutan\\)) Tj ET\n",
                     margin_left,
                     current_y,
                     sanitize_pdf_text(&bill.customer_name)
@@ -327,10 +327,10 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
                 date_str
             ));
 
-            // 3. Uraian Transaksi (maksimal ~30 karakter agar tidak menabrak batas kolom)
+            // 3. Uraian Transaksi (maksimal 26 karakter agar proporsional dan tidak menabrak batas kolom)
             let mut desc_clean = sanitize_pdf_text(&item.description);
-            if desc_clean.chars().count() > 33 {
-                desc_clean = format!("{}...", desc_clean.chars().take(30).collect::<String>());
+            if desc_clean.chars().count() > 26 {
+                desc_clean = format!("{}...", desc_clean.chars().take(23).collect::<String>());
             }
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
@@ -355,7 +355,7 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
                 .unwrap_or_else(|| "-".into());
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[4] + 8.0,
+                col_x[4] + 4.0,
                 text_y,
                 price_str
             ));
@@ -364,7 +364,7 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
             let debit_str = format_idr_dots(item.debit_idr);
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[5] + 8.0,
+                col_x[5] + 4.0,
                 text_y,
                 debit_str
             ));
@@ -377,18 +377,18 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
             };
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[6] + 8.0,
+                col_x[6] + 4.0,
                 text_y,
                 alloc_str
             ));
 
-            // 8. Sisa Tagihan (Warna Merah Bold)
+            // 8. Saldo Berjalan (Warna Merah Bold)
             let rem_str = format_idr_dots(item.remaining_idr);
             current_page_stream.push_str("ET\n"); // Akhiri font regular
             current_page_stream.push_str("0.75 0.1 0.1 rg BT /F2 8 Tf\n");
             current_page_stream.push_str(&format!(
                 "{:.2} {:.2} Td ({}) Tj ET\n",
-                col_x[7] + 8.0,
+                col_x[7] + 6.0,
                 text_y,
                 rem_str
             ));
@@ -414,13 +414,13 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
         ));
         current_page_stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-            col_x[5] + 8.0,
+            col_x[5] + 4.0,
             tot_y,
             format_idr_dots(total_debit)
         ));
         current_page_stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-            col_x[6] + 8.0,
+            col_x[6] + 4.0,
             tot_y,
             format_idr_dots(total_allocated)
         ));
@@ -429,7 +429,7 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
         current_page_stream.push_str("0.8 0.05 0.05 rg BT /F2 8.5 Tf\n");
         current_page_stream.push_str(&format!(
             "{:.2} {:.2} Td (Rp {}) Tj ET\n",
-            col_x[7] + 8.0,
+            col_x[7] + 6.0,
             tot_y,
             format_idr_dots(total_remaining)
         ));
