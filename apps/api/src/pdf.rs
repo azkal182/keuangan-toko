@@ -51,6 +51,173 @@ pub fn format_idr_dots(val: i64) -> String {
     if is_neg { format!("-{}", out) } else { out }
 }
 
+fn helvetica_char_width(c: char, is_bold: bool) -> f32 {
+    match c {
+        '0'..='9' => 556.0,
+        '.' | ',' | ':' | ';' => 278.0,
+        '-' => 333.0,
+        ' ' => 278.0,
+        '(' | ')' => 333.0,
+        '[' | ']' => 333.0,
+        '/' | '\\' => 278.0,
+        'R' => {
+            if is_bold {
+                722.0
+            } else {
+                667.0
+            }
+        }
+        'p' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'a' => 556.0,
+        'b' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'c' => {
+            if is_bold {
+                556.0
+            } else {
+                500.0
+            }
+        }
+        'd' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'e' => 556.0,
+        'f' => {
+            if is_bold {
+                333.0
+            } else {
+                278.0
+            }
+        }
+        'g' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'h' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'i' | 'j' | 'l' => {
+            if is_bold {
+                278.0
+            } else {
+                222.0
+            }
+        }
+        'k' => {
+            if is_bold {
+                556.0
+            } else {
+                500.0
+            }
+        }
+        'm' => {
+            if is_bold {
+                889.0
+            } else {
+                833.0
+            }
+        }
+        'n' | 'o' | 'q' | 'u' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'r' => {
+            if is_bold {
+                389.0
+            } else {
+                333.0
+            }
+        }
+        's' => {
+            if is_bold {
+                556.0
+            } else {
+                500.0
+            }
+        }
+        't' => {
+            if is_bold {
+                333.0
+            } else {
+                278.0
+            }
+        }
+        'v' | 'x' | 'y' | 'z' => {
+            if is_bold {
+                556.0
+            } else {
+                500.0
+            }
+        }
+        'w' => {
+            if is_bold {
+                778.0
+            } else {
+                722.0
+            }
+        }
+        'A' | 'B' | 'K' | 'N' | 'U' | 'V' | 'X' | 'Y' => {
+            if is_bold {
+                722.0
+            } else {
+                667.0
+            }
+        }
+        'C' | 'D' | 'H' => 722.0,
+        'E' | 'P' | 'S' => 667.0,
+        'F' | 'T' | 'Z' => 611.0,
+        'G' | 'O' | 'Q' => 778.0,
+        'I' => 278.0,
+        'J' => {
+            if is_bold {
+                556.0
+            } else {
+                500.0
+            }
+        }
+        'L' => {
+            if is_bold {
+                611.0
+            } else {
+                556.0
+            }
+        }
+        'M' => 833.0,
+        'W' => 944.0,
+        _ => 500.0,
+    }
+}
+
+pub fn helvetica_text_width(text: &str, font_size: f32, is_bold: bool) -> f32 {
+    let units: f32 = text.chars().map(|c| helvetica_char_width(c, is_bold)).sum();
+    units * font_size / 1000.0
+}
+
 pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
     // Dimensi halaman A4: 595.28 pt x 841.89 pt
     let page_width = 595.28_f32;
@@ -201,35 +368,36 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
             col_x[2] + 4.0,
             th_y
         ));
-        // Qty
+        // Qty (Rata Kanan)
+        let qty_th_x = col_x[4] - 4.0 - helvetica_text_width("Qty", 8.5, true);
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Qty) Tj\n",
-            col_x[3] + 4.0,
-            th_y
+            qty_th_x, th_y
         ));
-        // Harga Satuan
+        // Harga Satuan (Rata Kanan)
+        let harga_th_x = col_x[5] - 5.0 - helvetica_text_width("Harga Satuan", 8.5, true);
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Harga Satuan) Tj\n",
-            col_x[4] + 3.0,
-            th_y
+            harga_th_x, th_y
         ));
-        // Debet (Rp)
+        // Debet (Rp) (Rata Kanan)
+        let debet_th_x = col_x[6] - 5.0 - helvetica_text_width("Debet (Rp)", 8.5, true);
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Debet \\(Rp\\)) Tj\n",
-            col_x[5] + 4.0,
-            th_y
+            debet_th_x, th_y
         ));
-        // Kredit (Rp)
+        // Kredit (Rp) (Rata Kanan)
+        let kredit_th_x = col_x[7] - 5.0 - helvetica_text_width("Kredit (Rp)", 8.5, true);
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Kredit \\(Rp\\)) Tj\n",
-            col_x[6] + 4.0,
-            th_y
+            kredit_th_x, th_y
         ));
-        // Saldo Berjalan (Rp)
+        // Saldo Berjalan (Rp) (Rata Kanan)
+        let saldo_th_x =
+            margin_right - 6.0 - helvetica_text_width("Saldo Berjalan (Rp)", 8.5, true);
         stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm (Saldo Berjalan \\(Rp\\)) Tj\n",
-            col_x[7] + 6.0,
-            th_y
+            saldo_th_x, th_y
         ));
 
         stream.push_str("ET\n");
@@ -339,58 +507,55 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
                 desc_clean
             ));
 
-            // 4. Qty
+            // 4. Qty (Rata Kanan)
             let qty_clean = item.quantity.as_deref().unwrap_or("1");
+            let qty_x = col_x[4] - 4.0 - helvetica_text_width(qty_clean, 8.0, false);
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[3] + 4.0,
+                qty_x,
                 text_y,
                 sanitize_pdf_text(qty_clean)
             ));
 
-            // 5. Harga Satuan
+            // 5. Harga Satuan (Rata Kanan)
             let price_str = item
                 .unit_price_idr
                 .map(format_idr_dots)
                 .unwrap_or_else(|| "-".into());
+            let price_x = col_x[5] - 5.0 - helvetica_text_width(&price_str, 8.0, false);
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[4] + 4.0,
-                text_y,
-                price_str
+                price_x, text_y, price_str
             ));
 
-            // 6. Debet
+            // 6. Debet (Rata Kanan)
             let debit_str = format_idr_dots(item.debit_idr);
+            let debit_x = col_x[6] - 5.0 - helvetica_text_width(&debit_str, 8.0, false);
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[5] + 4.0,
-                text_y,
-                debit_str
+                debit_x, text_y, debit_str
             ));
 
-            // 7. Kredit (Terbayar)
+            // 7. Kredit (Terbayar) (Rata Kanan)
             let alloc_str = if item.allocated_idr > 0 {
                 format_idr_dots(item.allocated_idr)
             } else {
                 "-".into()
             };
+            let alloc_x = col_x[7] - 5.0 - helvetica_text_width(&alloc_str, 8.0, false);
             current_page_stream.push_str(&format!(
                 "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-                col_x[6] + 4.0,
-                text_y,
-                alloc_str
+                alloc_x, text_y, alloc_str
             ));
 
-            // 8. Saldo Berjalan (Warna Merah Bold)
+            // 8. Saldo Berjalan (Warna Merah Bold, Rata Kanan)
             let rem_str = format_idr_dots(item.remaining_idr);
+            let rem_x = margin_right - 6.0 - helvetica_text_width(&rem_str, 8.0, true);
             current_page_stream.push_str("ET\n"); // Akhiri font regular
             current_page_stream.push_str("0.75 0.1 0.1 rg BT /F2 8 Tf\n");
             current_page_stream.push_str(&format!(
                 "{:.2} {:.2} Td ({}) Tj ET\n",
-                col_x[7] + 6.0,
-                text_y,
-                rem_str
+                rem_x, text_y, rem_str
             ));
         }
 
@@ -412,26 +577,28 @@ pub fn generate_customer_bill_pdf(bill: &CustomerBillData) -> Vec<u8> {
             col_x[0] + 6.0,
             tot_y
         ));
+
+        let tot_deb_str = format_idr_dots(total_debit);
+        let tot_deb_x = col_x[6] - 5.0 - helvetica_text_width(&tot_deb_str, 8.5, true);
         current_page_stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-            col_x[5] + 4.0,
-            tot_y,
-            format_idr_dots(total_debit)
+            tot_deb_x, tot_y, tot_deb_str
         ));
+
+        let tot_alloc_str = format_idr_dots(total_allocated);
+        let tot_alloc_x = col_x[7] - 5.0 - helvetica_text_width(&tot_alloc_str, 8.5, true);
         current_page_stream.push_str(&format!(
             "1 0 0 1 {:.2} {:.2} Tm ({}) Tj\n",
-            col_x[6] + 4.0,
-            tot_y,
-            format_idr_dots(total_allocated)
+            tot_alloc_x, tot_y, tot_alloc_str
         ));
         current_page_stream.push_str("ET\n");
 
+        let tot_rem_str = format!("Rp {}", format_idr_dots(total_remaining));
+        let tot_rem_x = margin_right - 6.0 - helvetica_text_width(&tot_rem_str, 8.5, true);
         current_page_stream.push_str("0.8 0.05 0.05 rg BT /F2 8.5 Tf\n");
         current_page_stream.push_str(&format!(
-            "{:.2} {:.2} Td (Rp {}) Tj ET\n",
-            col_x[7] + 6.0,
-            tot_y,
-            format_idr_dots(total_remaining)
+            "{:.2} {:.2} Td ({}) Tj ET\n",
+            tot_rem_x, tot_y, tot_rem_str
         ));
     }
 
@@ -652,6 +819,7 @@ mod tests {
         let pdf_str = String::from_utf8_lossy(&pdf);
         assert!(pdf_str.contains("/Catalog"));
         assert!(pdf_str.contains("/Pages"));
+        assert!(pdf_str.contains("PIUTANG REZA PUTRA"));
         assert!(pdf_str.contains("DESA SUMBARANG"));
         assert!(pdf_str.contains("55.000"));
         assert!(pdf_str.contains("85.000")); // Total sisa tagihan 55.000 + 30.000
