@@ -5,6 +5,7 @@
 //! - Native DBGrid dengan kolom indikator baris (`#` / `▶`), garis sel tegas, dan format akuntansi `(Rp ...)`
 //! - Seluruh data, aturan bisnis, dan otorisasi selaras 100% dengan spesifikasi final (ADR-007, API_SPEC, FEATURE_SPECIFICATIONS)
 #![allow(clippy::get_first, clippy::too_many_arguments, clippy::collapsible_if)]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
 mod features;
@@ -26,6 +27,7 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::calendar::Date;
 use gpui_kit::component::date_picker::{DatePickerEvent, DatePickerState};
+use gpui_kit::component::dialog::DialogEntrance;
 use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::table::{TableEvent, TableState};
@@ -708,6 +710,9 @@ impl Desktop {
         ];
         self.form_active = 1;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::NewCustomer);
     }
 
@@ -748,6 +753,9 @@ impl Desktop {
         ];
         self.form_active = 1;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::EditCustomer { customer_id: cid });
     }
 
@@ -774,6 +782,9 @@ impl Desktop {
         ];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::MergeCustomer { source_id: cid });
     }
 
@@ -803,6 +814,9 @@ impl Desktop {
         self.sale_active_field = (self.sale_items.len(), 0);
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::RecordSale);
     }
 
@@ -834,6 +848,9 @@ impl Desktop {
         ];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::RecordPayment);
     }
 
@@ -908,6 +925,9 @@ impl Desktop {
                         ];
                         this.form_active = 2;
                         this.form_error.clear();
+                        this.customer_form_initialized = false;
+                        this.picker_modal = None;
+                        this.kit_dialog_open = false;
                         this.active_modal = Some(ActiveModal::ApplyDeposit);
                     }
                     Err(error) => {
@@ -968,6 +988,9 @@ impl Desktop {
         ];
         self.form_active = 1;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::ReallocatePayment {
             payment_id: payment_id.to_string(),
         });
@@ -987,6 +1010,9 @@ impl Desktop {
             )];
             self.form_active = 0;
             self.form_error.clear();
+            self.customer_form_initialized = false;
+            self.picker_modal = None;
+            self.kit_dialog_open = false;
             self.active_modal = Some(ActiveModal::ReverseTransaction {
                 customer_id: cid.clone(),
                 entry_id: entry_id.to_string(),
@@ -1007,6 +1033,9 @@ impl Desktop {
         ];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::FilterLedgerDate);
     }
 
@@ -1029,6 +1058,9 @@ impl Desktop {
         ];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::NewUser);
     }
 
@@ -1053,6 +1085,9 @@ impl Desktop {
         ];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::EditUser {
             user_id: user.id.clone(),
         });
@@ -1068,6 +1103,9 @@ impl Desktop {
         )];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::ResetUserPassword {
             user_id: user.id.clone(),
             username: user.username.clone(),
@@ -1385,6 +1423,9 @@ impl Desktop {
         ];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::ChangePassword);
     }
 
@@ -1395,6 +1436,9 @@ impl Desktop {
         )];
         self.form_active = 0;
         self.form_error.clear();
+        self.customer_form_initialized = false;
+        self.picker_modal = None;
+        self.kit_dialog_open = false;
         self.active_modal = Some(ActiveModal::ChangeAsOfDate);
     }
 
@@ -2280,14 +2324,14 @@ impl Render for Desktop {
                 .as_ref()
                 .is_some_and(|modal| *modal != ActiveModal::Login);
         if should_open_dialog != self.kit_dialog_open {
-            self.kit_dialog_open = should_open_dialog;
-            cx.defer_in(window, move |this, window, cx| {
+            cx.defer_in(window, |this, window, cx| {
                 let still_needed = this.session.is_some()
                     && this
                         .active_modal
                         .as_ref()
                         .is_some_and(|modal| *modal != ActiveModal::Login);
-                if still_needed && should_open_dialog {
+                let is_open = window.has_active_dialog(cx);
+                if still_needed && !is_open {
                     let Some(view) = this.dialog_view.clone() else {
                         return;
                     };
@@ -2308,6 +2352,7 @@ impl Render for Desktop {
                             .unwrap_or(520.0);
                         dialog
                             .centered()
+                            .entrance(DialogEntrance::Fade)
                             .w(px(width))
                             .p_0()
                             .close_button(false)
@@ -2324,9 +2369,10 @@ impl Render for Desktop {
                             }
                         }
                     });
-                } else if !still_needed && !should_open_dialog {
+                } else if !still_needed && is_open {
                     window.close_dialog(cx);
                 }
+                this.kit_dialog_open = still_needed;
             });
         }
         if self.active_modal == Some(ActiveModal::RecordSale) {
@@ -2704,6 +2750,10 @@ impl Render for Desktop {
                                             .child(
                                                 Button::new(format!("open-customer-select-{}", id))
                                                     .ghost()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .overflow_hidden()
+                                                    .justify_start()
                                                     .label(name.clone())
                                                     .on_click(cx.listener(
                                                         move |this, _, _, cx| {
@@ -2720,6 +2770,7 @@ impl Render for Desktop {
                                             .child(
                                                 Button::new(format!("open-customer-close-{}", id))
                                                     .ghost()
+                                                    .flex_shrink_0()
                                                     .label("×")
                                                     .accessibility_label(format!(
                                                         "Tutup detail {name}"

@@ -31,53 +31,109 @@ impl Desktop {
         }
         div()
             .size_full()
-            .bg(rgb(Theme::BG_APP))
+            .bg(rgb(0xEEF2F8))
             .flex()
             .items_center()
             .justify_center()
             .child(
                 div()
-                    .w(px(440.0))
+                    .w(px(460.0))
                     .max_w(gpui::relative(0.94))
-                    .p(px(28.0))
                     .bg(rgb(Theme::BG_CARD))
                     .border_1()
                     .border_color(rgb(Theme::BORDER_DEFAULT))
-                    .rounded(px(10.0))
+                    .rounded(px(12.0))
+                    .overflow_hidden()
                     .shadow_2xl()
                     .flex()
                     .flex_col()
-                    .gap(px(18.0))
                     .child(
                         div()
-                            .text_size(px(22.0))
-                            .font_weight(FontWeight::BOLD)
-                            .child("Keuangan Toko"),
+                            .bg(rgb(0x101F42))
+                            .p(px(28.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(16.0))
+                            .child(
+                                gpui::img("brand/piutang-reza-putra.png")
+                                    .w(px(62.0))
+                                    .h(px(62.0))
+                                    .rounded(px(12.0)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(5.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(20.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(0xFFFFFF))
+                                            .child("Piutang Reza Putra"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .text_color(rgb(0xBDCCE5))
+                                            .child("Pencatatan piutang yang lebih tertata"),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
-                            .text_size(px(13.0))
-                            .text_color(rgb(Theme::TEXT_SECONDARY))
-                            .child("Masuk untuk melanjutkan"),
-                    )
-                    .child(form)
-                    .when(!self.form_error.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
-                                .child(self.form_error.clone()),
-                        )
-                    })
-                    .child(
-                        Button::new("login-submit")
-                            .primary()
-                            .label(if self.is_loading {
-                                "Sedang masuk..."
-                            } else {
-                                "Masuk"
+                            .p(px(28.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(18.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(5.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(19.0))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(Theme::TEXT_PRIMARY))
+                                            .child("Selamat datang"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.5))
+                                            .text_color(rgb(Theme::TEXT_SECONDARY))
+                                            .child("Masuk dengan akun Anda untuk melanjutkan."),
+                                    ),
+                            )
+                            .child(form)
+                            .when(!self.form_error.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .p(px(10.0))
+                                        .rounded(px(6.0))
+                                        .bg(rgb(Theme::BADGE_DEBIT_BG))
+                                        .text_size(px(12.0))
+                                        .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
+                                        .child(self.form_error.clone()),
+                                )
                             })
-                            .disabled(self.is_loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.submit_modal(cx))),
+                            .child(
+                                Button::new("login-submit")
+                                    .primary()
+                                    .label(if self.is_loading {
+                                        "Sedang masuk..."
+                                    } else {
+                                        "Masuk"
+                                    })
+                                    .disabled(self.is_loading)
+                                    .on_click(cx.listener(|this, _, _, cx| this.submit_modal(cx))),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(Theme::TEXT_LIGHT))
+                                    .child("Pastikan perangkat terhubung ke internet."),
+                            ),
                     ),
             )
     }

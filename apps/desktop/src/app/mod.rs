@@ -4,7 +4,26 @@ use crate::{
     Desktop,
     store::{HttpApiAdapter, TokoStoreAdapter, mock_store::MockDataAdapter},
 };
+use gpui::AssetSource;
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
+use std::borrow::Cow;
+
+struct AppAssets;
+
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        if path == "brand/piutang-reza-putra.png" {
+            return Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../assets/piutang-reza-putra.png"
+            ))));
+        }
+        gpui_kit::assets::Assets.load(path)
+    }
+
+    fn list(&self, path: &str) -> gpui::Result<Vec<gpui::SharedString>> {
+        gpui_kit::assets::Assets.list(path)
+    }
+}
 
 /// Pilih sumber data: API nyata (default) atau mock lokal (`TOKO_DESKTOP_ADAPTER=mock`).
 /// Base URL API dapat diubah lewat `TOKO_API_BASE_URL`.
@@ -22,7 +41,7 @@ pub(crate) fn build_store_from_env() -> Box<dyn TokoStoreAdapter> {
 
 pub(crate) fn run() {
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(AppAssets)
         .run(|cx: &mut App| {
             gpui_kit::init(cx);
             cx.bind_keys([
@@ -34,7 +53,7 @@ pub(crate) fn run() {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(gpui::TitlebarOptions {
-                        title: Some("Keuangan Toko — Aplikasi Desktop Native".into()),
+                        title: Some("Piutang Reza Putra".into()),
                         ..Default::default()
                     }),
                     ..Default::default()
