@@ -4,6 +4,8 @@
 
 use crate::ui::theme::Theme;
 use gpui::{AnyElement, Div, FontWeight, div, prelude::*, px, rgb};
+use gpui_kit::component::dialog::{DialogContent, DialogFooter, DialogHeader, DialogTitle};
+use gpui_kit::component::scroll::ScrollableElement;
 
 pub struct ModalDialog {
     pub title: &'static str,
@@ -33,66 +35,76 @@ impl ModalDialog {
     }
 
     pub fn frame(self, body: AnyElement, footer: Div) -> Div {
-        div()
-            .absolute()
-            .inset_0()
-            .bg(Theme::hsla_alpha(Theme::MODAL_BACKDROP, 0.50))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .w(px(self.width_px))
-                    .when_some(self.height_px, |d, h| d.h(px(h)))
-                    .bg(rgb(0xFFFFFF))
-                    .border_1()
-                    .border_color(rgb(Theme::MODAL_BORDER))
-                    .rounded(px(4.0))
-                    .shadow_2xl()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    // Native Dialog Titlebar
-                    .child(
-                        div()
-                            .h(px(34.0))
-                            .bg(rgb(Theme::MODAL_HEADER_BG))
-                            .px(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(
+        div().w_full().flex().flex_col().child(
+            div()
+                .w_full()
+                .when_some(self.height_px, |d, h| d.h(px(h)))
+                .bg(rgb(0xFFFFFF))
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                // Native Dialog Titlebar
+                .child(
+                    DialogHeader::new()
+                        .h(px(48.0))
+                        .flex_shrink_0()
+                        .bg(rgb(Theme::BG_CARD))
+                        .border_b_1()
+                        .border_color(rgb(Theme::BORDER_DEFAULT))
+                        .px(px(16.0))
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(
+                                    DialogTitle::new()
+                                        .text_size(px(14.0))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(rgb(Theme::TEXT_PRIMARY))
+                                        .child(self.title),
+                                )
+                                .when_some(self.subtitle, |d, sub| {
+                                    d.child(
                                         div()
-                                            .text_size(px(12.0))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0xFFFFFF))
-                                            .child(self.title),
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(Theme::TEXT_MUTED))
+                                            .child(format!("— {}", sub)),
                                     )
-                                    .when_some(self.subtitle, |d, sub| {
-                                        d.child(
-                                            div()
-                                                .text_size(px(11.0))
-                                                .text_color(rgb(0x94A3B8))
-                                                .child(format!("— {}", sub)),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(0x94A3B8))
-                                    .child("[Esc] Tutup"),
-                            ),
-                    )
-                    // Isi Form Dialog
-                    .child(div().flex_1().p(px(14.0)).overflow_hidden().child(body))
-                    // Footer Dialog
-                    .child(footer),
-            )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(Theme::TEXT_MUTED))
+                                .child("[Esc] Tutup"),
+                        ),
+                )
+                // Isi Form Dialog
+                .child(
+                    DialogContent::new()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .p(px(14.0))
+                        .child(
+                            div()
+                                .id("modal-body-scroll")
+                                .flex_1()
+                                .min_h(px(0.0))
+                                .overflow_scrollbar()
+                                .child(body),
+                        ),
+                )
+                // Footer Dialog
+                .child(
+                    DialogFooter::new()
+                        .w_full()
+                        .flex_shrink_0()
+                        .child(footer.w_full()),
+                ),
+        )
     }
 }

@@ -9,7 +9,7 @@ use gpui::{Div, FontWeight, div, prelude::*, px, rgb};
 /// Baris Menu Sistem Native (26px) di puncak jendela aplikasi
 pub fn render_system_menu_bar() -> Div {
     div()
-        .h(px(26.0))
+        .h(px(34.0))
         .bg(rgb(Theme::BG_SYSTEM_MENU))
         .border_b_1()
         .border_color(rgb(Theme::BORDER_DEFAULT))
@@ -17,43 +17,6 @@ pub fn render_system_menu_bar() -> Div {
         .flex()
         .items_center()
         .justify_between()
-}
-
-/// Item teks pada System Menu Bar (contoh: `Berkas`, `Navigasi`, `Akun`)
-pub fn system_menu_item(label: &'static str, shortcut: &'static str, is_active: bool) -> Div {
-    div()
-        .h(px(20.0))
-        .px(px(7.0))
-        .rounded(px(2.0))
-        .bg(rgb(if is_active {
-            Theme::BG_SIDEBAR_ACTIVE
-        } else {
-            Theme::BG_SYSTEM_MENU
-        }))
-        .flex()
-        .items_center()
-        .gap(px(5.0))
-        .cursor_pointer()
-        .hover(|d| d.bg(rgb(0xCBD5E1)))
-        .child(
-            div()
-                .text_size(px(11.0))
-                .font_weight(if is_active {
-                    FontWeight::BOLD
-                } else {
-                    FontWeight::MEDIUM
-                })
-                .text_color(rgb(Theme::TEXT_PRIMARY))
-                .child(label),
-        )
-        .when(!shortcut.is_empty(), |d| {
-            d.child(
-                div()
-                    .text_size(px(9.5))
-                    .text_color(rgb(Theme::TEXT_MUTED))
-                    .child(shortcut),
-            )
-        })
 }
 
 /// Kontainer Panel Navigasi Dok Kiri (Native Explorer Sidebar - lebar 210px)
@@ -84,78 +47,22 @@ pub fn sidebar_section_header(title: &'static str) -> Div {
 
 /// Item modul pada panel navigasi kiri
 pub fn sidebar_nav_item(
+    id: &'static str,
     icon: &'static str,
     label: &'static str,
     shortcut: &'static str,
     is_active: bool,
-) -> Div {
-    div()
-        .h(px(28.0))
-        .mx(px(6.0))
-        .px(px(8.0))
-        .rounded(px(3.0))
-        .bg(rgb(if is_active {
-            Theme::BG_SIDEBAR_ACTIVE
-        } else {
-            Theme::BG_SIDEBAR
-        }))
-        .border_1()
-        .border_color(rgb(if is_active {
-            Theme::PRIMARY_BORDER
-        } else {
-            Theme::BG_SIDEBAR
-        }))
-        .flex()
-        .items_center()
-        .justify_between()
-        .cursor_pointer()
-        .when(!is_active, |d| d.hover(|d| d.bg(rgb(0xE2E8F0))))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(7.0))
-                .child(
-                    div()
-                        .text_size(px(11.5))
-                        .text_color(rgb(if is_active {
-                            Theme::PRIMARY
-                        } else {
-                            Theme::TEXT_MUTED
-                        }))
-                        .child(icon),
-                )
-                .child(
-                    div()
-                        .text_size(px(11.5))
-                        .font_weight(if is_active {
-                            FontWeight::BOLD
-                        } else {
-                            FontWeight::MEDIUM
-                        })
-                        .text_color(rgb(if is_active {
-                            Theme::PRIMARY_HOVER
-                        } else {
-                            Theme::TEXT_PRIMARY
-                        }))
-                        .child(label),
-                ),
-        )
-        .when(!shortcut.is_empty(), |d| {
-            d.child(
-                div()
-                    .px(px(4.0))
-                    .py(px(1.0))
-                    .rounded(px(2.0))
-                    .bg(rgb(if is_active { 0xBFDBFE } else { 0xE2E8F0 }))
-                    .text_size(px(9.5))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(if is_active {
-                        Theme::PRIMARY_HOVER
-                    } else {
-                        Theme::TEXT_MUTED
-                    }))
-                    .child(shortcut),
-            )
-        })
+) -> gpui_kit::component::button::Button {
+    use gpui_kit::component::button::{Button, ButtonVariants};
+    let text = if shortcut.is_empty() {
+        format!("{icon}  {label}")
+    } else {
+        format!("{icon}  {label}  {shortcut}")
+    };
+    let button = Button::new(id).label(text);
+    if is_active {
+        button.primary()
+    } else {
+        button.ghost()
+    }
 }

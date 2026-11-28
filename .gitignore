@@ -6,6 +6,8 @@ docs/files/*.xlsx
 
 # Workspace build and dependency artifacts
 /target/
+/dist/desktop/
+/experiments/gpui-kit-prototype/target/
 node_modules/
 /apps/web/dist/
 experiments/

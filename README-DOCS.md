@@ -24,6 +24,8 @@
 | 15 | [UI_UX_PERFORMANCE_AUDIT](docs/UI_UX_PERFORMANCE_AUDIT.md) | temuan review frontend, route, pemisahan bundle, dan tindak lanjut pengukuran |
 | 16 | [DESKTOP_IMPLEMENTATION_PLAN](docs/DESKTOP_IMPLEMENTATION_PLAN.md) | rencana PH-09 dengan prototipe data sintetis sebelum integrasi API |
 | 17 | [DESKTOP_WEB_FEATURE_MAP](docs/DESKTOP_WEB_FEATURE_MAP.md) | matriks pemetaan fitur web terhadap kesiapan prototipe mock desktop |
+| 18 | [DESKTOP_REDESIGN_REFACTOR_PLAN](docs/DESKTOP_REDESIGN_REFACTOR_PLAN.md) | tiga fase pematangan UI, migrasi komponen dan refactor desktop |
+| 19 | [DESKTOP_DESIGN_FOUNDATION](docs/DESKTOP_DESIGN_FOUNDATION.md) | dasar visual, batas modul dan strategi kandidat migrasi GPUI Kit |
 
 ## Skill khusus repo
 

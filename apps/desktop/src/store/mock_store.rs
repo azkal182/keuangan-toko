@@ -2,8 +2,8 @@
 //! Seluruh perilaku mengikuti spesifikasi final (ADR-007, PRODUCT_SPEC.md, FEATURE_SPECIFICATIONS.md, DATA_DICTIONARY.md):
 //! - BR-005: Nilai uang integer IDR (i64), quantity decimal skala maks 3, pembulatan half-up per item.
 //! - BR-006 / FR-003: Pembayaran dialokasikan FIFO ke debit terbuka terlama; surplus menjadi Saldo Kredit Pelanggan
-//!   dan TIDAK auto-apply pada penjualan baru (hanya diterapkan melalui aksi manual eksplisit dengan alasan audit).
-//! - BR-012 / FR-002: Tanggal masa depan ditolak; backdate hanya Owner dengan alasan wajib.
+//!   dan otomatis diterapkan ke penjualan baru secara FIFO sesuai OQ-28.
+//! - BR-012 / FR-002: Tanggal masa depan ditolak; tanggal lampau diizinkan tanpa alasan.
 //! - FR-004: Saldo berjalan dihitung kronologis `(effective_date, source_order)` dari awal histori meskipun difilter tanggal.
 //! - FR-005: 5 bucket umur piutang (0-15, 16-30, 31-45, 46-60, >60) + unknown_date + future_date = total_open_idr.
 //! - FR-007: Reversal, Reallocation, Merge Customer, dan User Management khusus Owner; kata sandi minimal 15 karakter.
@@ -46,6 +46,9 @@ pub fn compute_line_total_half_up(
     if clean.is_empty() {
         return Err(AppError("Kuantitas barang wajib diisi.".into()));
     }
+    if !clean.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return Err(AppError("Kuantitas harus berupa angka positif.".into()));
+    }
     let parts: Vec<&str> = clean.split('.').collect();
     if parts.len() > 2 {
         return Err(AppError("Format kuantitas tidak valid.".into()));
@@ -70,7 +73,10 @@ pub fn compute_line_total_half_up(
             .parse()
             .map_err(|_| AppError("Desimal kuantitas tidak valid.".into()))?
     };
-    let milli_qty = whole * 1000 + frac;
+    let milli_qty = whole
+        .checked_mul(1000)
+        .and_then(|value| value.checked_add(frac))
+        .ok_or_else(|| AppError("Kuantitas terlalu besar.".into()))?;
     if milli_qty <= 0 {
         return Err(AppError("Kuantitas harus lebih besar dari nol.".into()));
     }
@@ -80,9 +86,12 @@ pub fn compute_line_total_half_up(
         ));
     }
     // Half-up rounding: (milli_qty * unit_price + 500) / 1000
-    let product = milli_qty * (unit_price_idr as i128);
-    let rounded = (product + 500) / 1000;
-    Ok(rounded as i64)
+    let product = milli_qty
+        .checked_mul(unit_price_idr as i128)
+        .and_then(|value| value.checked_add(500))
+        .ok_or_else(|| AppError("Total barang terlalu besar.".into()))?;
+    let rounded = product / 1000;
+    i64::try_from(rounded).map_err(|_| AppError("Total barang terlalu besar.".into()))
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +158,7 @@ struct InternalUser {
     created_at: NaiveDate,
 }
 
+#[derive(Clone)]
 pub struct MockDataAdapter {
     users: Vec<InternalUser>,
     customers: BTreeMap<String, InternalCustomer>,
@@ -230,473 +240,90 @@ impl MockDataAdapter {
         ];
         self.current_user_id = Some(self.users[0].id.clone());
 
-        // =========================================================================
-        // 1. DESA SUMBARANG (P017) - Dataset lengkap 48 transaksi sesuai buku riil
-        //    Total Piutang Terutang = Rp 1.938.200 | Saldo Kredit = Rp 0
-        // =========================================================================
-        let cust1_id = "c1111111-1111-1111-1111-111111111111".to_string();
-        let mut cust1 = InternalCustomer {
-            id: cust1_id.clone(),
-            code: Some("P017".into()),
-            name: "DESA SUMBARANG".into(),
-            address: None, // Sesuai tampilan web: "Alamat belum tercatat"
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-
-        let d_sep_date = NaiveDate::from_ymd_opt(2025, 9, 23).unwrap();
-        let d_sep = Some(d_sep_date);
-        let d_des = Some(NaiveDate::from_ymd_opt(2025, 12, 8).unwrap());
-        let mut order = 1_i64;
-
-        // Nota sebelum pembayaran 23 Sep 2025: total 7.051.600
-        // (1) Saldo awal sebelum 23 Sep: 7.039.600, (2) AMPLOP COKLAT 2.000 -> 7.041.600, (3) KATER 10.000 -> 7.051.600
-        let pre_payment_items: Vec<(&str, Option<&str>, Option<i64>, i64)> = vec![
-            ("SALDO AWAL PERIode SEBELUMNYA", None, None, 7_039_600),
-            ("AMPLOP COKLAT", Some("1"), Some(2_000), 2_000),
-            ("KATER", Some("1"), Some(10_000), 10_000),
-        ];
-        let mut pre_debit_ids = Vec::new();
-        for (desc, qty, price, debit) in pre_payment_items {
-            let eid = Uuid::new_v4().to_string();
-            pre_debit_ids.push((eid.clone(), debit));
-            cust1.entries.push(InternalLedgerEntry {
-                id: eid.clone(),
-                entry_type: "legacy_debit".into(),
-                source_id: eid,
-                effective_date: d_sep,
+        // Data di bawah dibuat khusus untuk demo; tidak berasal dari workbook pelanggan.
+        let today = Local::now().date_naive();
+        for (id, name, code, active, debit, dated) in [
+            (
+                "demo-1",
+                "Pelanggan Contoh A",
+                "DEMO-01",
+                true,
+                100_000_i64,
+                true,
+            ),
+            ("demo-2", "Pelanggan Contoh B", "DEMO-02", true, 0_i64, true),
+            (
+                "demo-3",
+                "Pelanggan Contoh C",
+                "DEMO-03",
+                true,
+                18_000_i64,
+                true,
+            ),
+            (
+                "demo-4",
+                "Pelanggan Contoh D",
+                "DEMO-04",
+                true,
+                45_000_i64,
+                false,
+            ),
+            (
+                "demo-5",
+                "Pelanggan Contoh Nonaktif",
+                "DEMO-05",
+                false,
+                0_i64,
+                true,
+            ),
+        ] {
+            let entries = if debit > 0 {
+                vec![InternalLedgerEntry {
+                    id: format!("{id}-debit"),
+                    entry_type: "credit_sale".into(),
+                    source_id: format!("{id}-sale"),
+                    effective_date: dated.then_some(today),
+                    reference: None,
+                    description: "Barang contoh".into(),
+                    quantity: Some("1".into()),
+                    unit_price_idr: Some(debit),
+                    debit_idr: debit,
+                    credit_idr: 0,
+                    is_reversed: false,
+                    reversal_reason: None,
+                    replacement_entry_id: None,
+                    source_order: 1,
+                }]
+            } else {
+                Vec::new()
+            };
+            self.customers.insert(
+                id.into(),
+                InternalCustomer {
+                    id: id.into(),
+                    code: Some(code.into()),
+                    name: name.into(),
+                    address: None,
+                    is_active: active,
+                    version: 1,
+                    entries,
+                    payments: Vec::new(),
+                    allocations: Vec::new(),
+                },
+            );
+        }
+        // Saldo kredit contoh tanpa debit terbuka untuk menguji penerapan pada penjualan baru.
+        self.record_payment(
+            "demo-2",
+            &RecordPaymentInput {
+                received_date: today,
+                amount_idr: 500_000,
+                method: "cash".into(),
                 reference: None,
-                description: desc.into(),
-                quantity: qty.map(String::from),
-                unit_price_idr: price,
-                debit_idr: debit,
-                credit_idr: 0,
-                is_reversed: false,
-                reversal_reason: None,
-                replacement_entry_id: None,
-                source_order: order,
-            });
-            order += 1;
-        }
-
-        // Pembayaran Lunas 23 Sep 2025: Rp 7.070.500 -> menjadikan saldo berjalan (Rp 18.900)
-        let pay1_id = Uuid::new_v4().to_string();
-        cust1.payments.push(InternalPayment {
-            id: pay1_id.clone(),
-            customer_id: cust1_id.clone(),
-            amount_idr: 7_070_500,
-            received_date: d_sep_date,
-            method: "legacy".into(),
-            reference: Some("HIST-P017-01".into()),
-            note: Some("PEMBAYARAN LUNAS (Workbook Historis)".into()),
-            status: "posted".into(),
-            version: 1,
-        });
-        cust1.entries.push(InternalLedgerEntry {
-            id: pay1_id.clone(),
-            entry_type: "legacy_payment".into(),
-            source_id: pay1_id.clone(),
-            effective_date: d_sep,
-            reference: None,
-            description: "PEMBAYARAN LUNAS".into(),
-            quantity: None,
-            unit_price_idr: None,
-            debit_idr: 0,
-            credit_idr: 7_070_500,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: order,
-        });
-        order += 1;
-
-        for (did, amt) in pre_debit_ids {
-            cust1.allocations.push(InternalAllocation {
-                payment_id: pay1_id.clone(),
-                debit_id: did,
-                amount_idr: amt,
-                reason: "Alokasi FIFO Historis".into(),
-            });
-        }
-
-        // Daftar 45 item belanja setelah pembayaran 23 Sep 2025 + 2 item 8 Des 2025
-        // Surplus 18.900 dari PEMBAYARAN LUNAS menyerap:
-        // - FC (15.300) -> Lunas, sisa surplus 3.600, running balance (Rp 3.600)
-        // - PAPER KLIP (3.000) -> Lunas, sisa surplus 600, running balance (Rp 600)
-        // - KERTAS F4 (110.000) -> Terserap 600, Belum Lunas (Sisa Rp 109.400), running balance Rp 109.400
-        let post_sep_items: Vec<(&str, &str, i64, i64, i64)> = vec![
-            ("FC", "51", 300, 15_300, 15_300),
-            ("PAPER KLIP", "1", 3_000, 3_000, 3_000),
-            ("KERTAS F4", "2", 55_000, 110_000, 600),
-            ("TINTA PSEN", "1", 110_000, 110_000, 0),
-            ("PEN", "1", 5_000, 5_000, 0),
-            ("BANER 1X75", "4", 18_750, 75_000, 0),
-            ("DESAIN", "1", 10_000, 10_000, 0),
-            ("BANER PPAN KARYA 1X75", "4", 18_750, 75_000, 0),
-            ("JILID", "5", 2_000, 10_000, 0),
-            ("ABNER 3X1", "1", 85_000, 85_000, 0),
-            ("BUKU BIGBOS 4 PAJK", "4", 32_000, 128_000, 0),
-            ("KERTAS F4", "1", 55_000, 55_000, 0),
-            ("MAP", "1", 35_000, 35_000, 0),
-            ("KUTANSI", "2", 4_000, 8_000, 0),
-            ("PEN WARNA", "1", 7_000, 7_000, 0),
-            ("PRINT", "4", 2_000, 8_000, 0),
-            ("FC", "13", 300, 3_900, 0),
-            ("PRINT", "1", 2_000, 2_000, 0),
-            ("MATRAI", "4", 12_000, 48_000, 0),
-            ("STEMPEL", "1", 70_000, 70_000, 0),
-            ("BENER PKK 120X90", "1", 37_000, 37_000, 0),
-            ("STEMPEL PKK", "1", 70_000, 70_000, 0),
-            ("ASTRO", "4", 4_000, 16_000, 0),
-            ("MANILA", "1", 4_000, 4_000, 0),
-            ("STEMPEL", "1", 70_000, 70_000, 0),
-            ("KERTAS THE", "10", 4_000, 40_000, 0),
-            ("BENER BPD 2,5X1", "1", 72_500, 72_500, 0),
-            ("KERTAS MANILA", "5", 4_000, 20_000, 0),
-            ("BOLPOIN STANDAR", "1", 23_000, 23_000, 0),
-            ("SPIDOL BESAR", "1", 10_000, 10_000, 0),
-            ("SPIDOL KECIL", "2", 2_000, 4_000, 0),
-            ("LEM BESAR", "1", 5_000, 5_000, 0),
-            ("BENER RKP DES 3X1", "1", 85_000, 85_000, 0),
-            ("BENER BPD PEMILIHAN 3X1", "1", 85_000, 85_000, 0),
-            ("BENER BPD 1,5X1,2", "4", 45_000, 180_000, 0),
-            ("SNAL KETER 2 BKS", "2", 35_000, 70_000, 0),
-            ("PRINT", "33", 1_000, 33_000, 0),
-            ("MIKA", "18", 750, 13_500, 0),
-            ("JLD", "9", 5_000, 45_000, 0),
-            ("PULPEN JOYKO", "1", 5_000, 5_000, 0),
-            ("JLD", "9", 5_000, 45_000, 0),
-            ("KERTAS F4", "1", 55_000, 55_000, 0),
-            ("JLD", "6", 5_000, 30_000, 0),
-            ("FC", "90", 300, 27_000, 0),
-            ("JLD", "6", 5_000, 30_000, 0),
-        ];
-
-        for (desc, qty, price, debit, allocated) in post_sep_items {
-            let eid = Uuid::new_v4().to_string();
-            cust1.entries.push(InternalLedgerEntry {
-                id: eid.clone(),
-                entry_type: "legacy_debit".into(),
-                source_id: eid.clone(),
-                effective_date: d_sep,
-                reference: None,
-                description: desc.into(),
-                quantity: Some(qty.into()),
-                unit_price_idr: Some(price),
-                debit_idr: debit,
-                credit_idr: 0,
-                is_reversed: false,
-                reversal_reason: None,
-                replacement_entry_id: None,
-                source_order: order,
-            });
-            order += 1;
-            if allocated > 0 {
-                cust1.allocations.push(InternalAllocation {
-                    payment_id: pay1_id.clone(),
-                    debit_id: eid,
-                    amount_idr: allocated,
-                    reason: "Alokasi FIFO Historis".into(),
-                });
-            }
-        }
-
-        // Transaksi 8 Des 2025: BATU (18.000) dan FC (900) -> Total Outstanding = 1.938.200
-        let des_items: Vec<(&str, &str, i64, i64)> =
-            vec![("BATU", "2", 9_000, 18_000), ("FC", "3", 300, 900)];
-        for (desc, qty, price, debit) in des_items {
-            let eid = Uuid::new_v4().to_string();
-            cust1.entries.push(InternalLedgerEntry {
-                id: eid.clone(),
-                entry_type: "legacy_debit".into(),
-                source_id: eid,
-                effective_date: d_des,
-                reference: None,
-                description: desc.into(),
-                quantity: Some(qty.into()),
-                unit_price_idr: Some(price),
-                debit_idr: debit,
-                credit_idr: 0,
-                is_reversed: false,
-                reversal_reason: None,
-                replacement_entry_id: None,
-                source_order: order,
-            });
-            order += 1;
-        }
-        self.customers.insert(cust1_id, cust1);
-
-        // =========================================================================
-        // 2. KECAMATAN (P002) - Piutang 0-15 Hari & 16-30 Hari
-        // =========================================================================
-        let cust2_id = "c2222222-2222-2222-2222-222222222222".to_string();
-        let mut cust2 = InternalCustomer {
-            id: cust2_id.clone(),
-            code: Some("P002".into()),
-            name: "KECAMATAN".into(),
-            address: Some("Gedung Kantor Kecamatan, Jl. Sudirman No. 1".into()),
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        let d_kec = Some(NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
-        let e_k1 = Uuid::new_v4().to_string();
-        cust2.entries.push(InternalLedgerEntry {
-            id: e_k1.clone(),
-            entry_type: "credit_sale".into(),
-            source_id: e_k1,
-            effective_date: d_kec,
-            reference: Some("INV-2026-011".into()),
-            description: "BAK STEMPEL JOYKO".into(),
-            quantity: Some("1".into()),
-            unit_price_idr: Some(12_000),
-            debit_idr: 12_000,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 1,
-        });
-        let e_k2 = Uuid::new_v4().to_string();
-        cust2.entries.push(InternalLedgerEntry {
-            id: e_k2.clone(),
-            entry_type: "credit_sale".into(),
-            source_id: e_k2,
-            effective_date: d_kec,
-            reference: Some("INV-2026-011".into()),
-            description: "BINDER KLIP NO. 200".into(),
-            quantity: Some("1".into()),
-            unit_price_idr: Some(6_000),
-            debit_idr: 6_000,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 2,
-        });
-        self.customers.insert(cust2_id, cust2);
-
-        // =========================================================================
-        // 3. TOKO BERKAH ABADI (P003) - Memiliki Saldo Kredit (Deposit) Rp 500.000
-        //    serta tagihan baru yang dapat diuji dengan fitur "Terapkan Saldo Kredit"
-        // =========================================================================
-        let cust3_id = "c3333333-3333-3333-3333-333333333333".to_string();
-        let mut cust3 = InternalCustomer {
-            id: cust3_id.clone(),
-            code: Some("P003".into()),
-            name: "TOKO BERKAH ABADI".into(),
-            address: Some("Pasar Baru Blok A No. 3".into()),
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        let d_nov = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
-        let pay3_id = Uuid::new_v4().to_string();
-        cust3.payments.push(InternalPayment {
-            id: pay3_id.clone(),
-            customer_id: cust3_id.clone(),
-            amount_idr: 500_000,
-            received_date: d_nov,
-            method: "cash".into(),
-            reference: Some("DP-001".into()),
-            note: Some("Setoran deposit belanja bulanan".into()),
-            status: "posted".into(),
-            version: 1,
-        });
-        cust3.entries.push(InternalLedgerEntry {
-            id: pay3_id.clone(),
-            entry_type: "payment".into(),
-            source_id: pay3_id,
-            effective_date: Some(d_nov),
-            reference: Some("DP-001".into()),
-            description: "PEMBAYARAN (Tunai)".into(),
-            quantity: None,
-            unit_price_idr: None,
-            debit_idr: 0,
-            credit_idr: 500_000,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 1,
-        });
-        self.customers.insert(cust3_id, cust3);
-
-        // =========================================================================
-        // 4. CV MANDIRI JAYA (P004) - Bucket 31-45 Hari
-        // =========================================================================
-        let cust4_id = "c4444444-4444-4444-4444-444444444444".to_string();
-        let mut cust4 = InternalCustomer {
-            id: cust4_id.clone(),
-            code: Some("P004".into()),
-            name: "CV MANDIRI JAYA".into(),
-            address: Some("Kawasan Industri Cilegon Blok C".into()),
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        let e_c4 = Uuid::new_v4().to_string();
-        cust4.entries.push(InternalLedgerEntry {
-            id: e_c4.clone(),
-            entry_type: "credit_sale".into(),
-            source_id: e_c4,
-            effective_date: Some(NaiveDate::from_ymd_opt(2026, 10, 15).unwrap()),
-            reference: Some("INV-2026-004".into()),
-            description: "BANNER OUTDOOR 3X1 METER".into(),
-            quantity: Some("2".into()),
-            unit_price_idr: Some(85_000),
-            debit_idr: 170_000,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 1,
-        });
-        self.customers.insert(cust4_id, cust4);
-
-        // =========================================================================
-        // 5. WARUNG BU ENI (P005) - Bucket 0-15 Hari
-        // =========================================================================
-        let cust5_id = "c5555555-5555-5555-5555-555555555555".to_string();
-        let mut cust5 = InternalCustomer {
-            id: cust5_id.clone(),
-            code: Some("P005".into()),
-            name: "WARUNG BU ENI".into(),
-            address: Some("Jl. Melati No. 8".into()),
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        let e_c5 = Uuid::new_v4().to_string();
-        cust5.entries.push(InternalLedgerEntry {
-            id: e_c5.clone(),
-            entry_type: "credit_sale".into(),
-            source_id: e_c5,
-            effective_date: Some(NaiveDate::from_ymd_opt(2026, 11, 20).unwrap()),
-            reference: None,
-            description: "BUKU NOTA KONTAN 2 PLY".into(),
-            quantity: Some("5".into()),
-            unit_price_idr: Some(4_500),
-            debit_idr: 22_500,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 1,
-        });
-        self.customers.insert(cust5_id, cust5);
-
-        // =========================================================================
-        // 6. SDN 01 MERDEKA (P006) - Bucket 46-60 Hari
-        // =========================================================================
-        let cust6_id = "c6666666-6666-6666-6666-666666666666".to_string();
-        let mut cust6 = InternalCustomer {
-            id: cust6_id.clone(),
-            code: Some("P006".into()),
-            name: "SDN 01 MERDEKA".into(),
-            address: Some("Jl. Pendidikan No. 45".into()),
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        let e_c6 = Uuid::new_v4().to_string();
-        cust6.entries.push(InternalLedgerEntry {
-            id: e_c6.clone(),
-            entry_type: "credit_sale".into(),
-            source_id: e_c6,
-            effective_date: Some(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()),
-            reference: Some("INV-SDN-09".into()),
-            description: "KERTAS F4 75GR (5 DUS)".into(),
-            quantity: Some("5".into()),
-            unit_price_idr: Some(240_000),
-            debit_idr: 1_200_000,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 1,
-        });
-        self.customers.insert(cust6_id, cust6);
-
-        // =========================================================================
-        // 7. KLINIK SEHAT FARMA (P007) - Bucket 0-15 Hari + 1 Unknown Date Exception
-        // =========================================================================
-        let cust7_id = "c7777777-7777-7777-7777-777777777777".to_string();
-        let mut cust7 = InternalCustomer {
-            id: cust7_id.clone(),
-            code: Some("P007".into()),
-            name: "KLINIK SEHAT FARMA".into(),
-            address: Some("Jl. Kesehatan Raya No. 12".into()),
-            is_active: true,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        let e_c7a = Uuid::new_v4().to_string();
-        cust7.entries.push(InternalLedgerEntry {
-            id: e_c7a.clone(),
-            entry_type: "credit_sale".into(),
-            source_id: e_c7a,
-            effective_date: Some(NaiveDate::from_ymd_opt(2026, 11, 24).unwrap()),
-            reference: None,
-            description: "STEMPEL FLASH DOKTER".into(),
-            quantity: Some("2".into()),
-            unit_price_idr: Some(75_000),
-            debit_idr: 150_000,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 1,
-        });
-        let e_c7b = Uuid::new_v4().to_string();
-        cust7.entries.push(InternalLedgerEntry {
-            id: e_c7b.clone(),
-            entry_type: "legacy_debit".into(),
-            source_id: e_c7b,
-            effective_date: None, // Tanggal tidak diketahui (exception bucket sesuai FR-005)
-            reference: None,
-            description: "NOTA LAMA TANPA TANGGAL (ARSIP)".into(),
-            quantity: Some("1".into()),
-            unit_price_idr: Some(45_000),
-            debit_idr: 45_000,
-            credit_idr: 0,
-            is_reversed: false,
-            reversal_reason: None,
-            replacement_entry_id: None,
-            source_order: 2,
-        });
-        self.customers.insert(cust7_id, cust7);
-
-        // =========================================================================
-        // 8. KOPERASI WARGA MAKMUR (P008) - Nonaktif
-        // =========================================================================
-        let cust8_id = "c8888888-8888-8888-8888-888888888888".to_string();
-        let cust8 = InternalCustomer {
-            id: cust8_id.clone(),
-            code: Some("P008".into()),
-            name: "KOPERASI WARGA MAKMUR".into(),
-            address: Some("Komplek Ruko Permata No. 5".into()),
-            is_active: false,
-            version: 1,
-            entries: Vec::new(),
-            payments: Vec::new(),
-            allocations: Vec::new(),
-        };
-        self.customers.insert(cust8_id, cust8);
+                note: Some("Pembayaran contoh".into()),
+            },
+        )
+        .expect("seed pembayaran contoh valid");
     }
 
     fn calculate_customer_balances(
@@ -706,6 +333,7 @@ impl MockDataAdapter {
     ) -> (i64, i64, i64, AgingBuckets) {
         let mut total_debit = 0_i64;
         let mut total_credit = 0_i64;
+        let mut ledger_balance = 0_i64;
         let mut allocated_per_debit: BTreeMap<String, i64> = BTreeMap::new();
 
         for alloc in &customer.allocations {
@@ -717,7 +345,10 @@ impl MockDataAdapter {
         let mut aging = AgingBuckets::default();
 
         for entry in &customer.entries {
-            if entry.is_reversed {
+            // Ledger keeps both the original and its contra-entry. Open items and
+            // available credit instead use only transactions that remain active.
+            ledger_balance += entry.debit_idr - entry.credit_idr;
+            if entry.is_reversed || entry.entry_type == "reversal" {
                 continue;
             }
             total_debit += entry.debit_idr;
@@ -755,13 +386,14 @@ impl MockDataAdapter {
         let total_allocated: i64 = customer.allocations.iter().map(|a| a.amount_idr).sum();
         let outstanding = total_debit.saturating_sub(total_allocated);
         let customer_credit = total_credit.saturating_sub(total_allocated);
-        let ledger_balance = total_debit - total_credit;
-
         (outstanding, customer_credit, ledger_balance, aging)
     }
 }
 
 impl TokoStoreAdapter for MockDataAdapter {
+    fn background_reader(&self) -> Box<dyn TokoStoreAdapter> {
+        Box::new(self.clone())
+    }
     fn adapter_label(&self) -> String {
         "MockStore (In-Memory)".into()
     }
@@ -1980,27 +1612,122 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mock_store_initial_customers_and_desa_sumbarang_reconciliation() {
+    fn reversal_of_unpaid_sale_does_not_create_customer_credit() {
+        let mut store = MockDataAdapter::new();
+        let customer = store
+            .list_customers(&CustomerQuery {
+                search: Some("DEMO-01".into()),
+                active_only: true,
+            })
+            .pop()
+            .unwrap();
+        let query = LedgerQuery {
+            from: None,
+            to: None,
+            order_desc: false,
+        };
+        let entry = store.get_ledger(&customer.id, &query).unwrap().entries[0]
+            .id
+            .clone();
+        store
+            .reverse_transaction(&customer.id, &entry, "Uji koreksi")
+            .unwrap();
+        let ledger = store.get_ledger(&customer.id, &query).unwrap();
+        assert_eq!(ledger.summary.outstanding_idr, 0);
+        assert_eq!(ledger.summary.customer_credit_idr, 0);
+        assert_eq!(ledger.summary.ledger_balance_idr, 0);
+        assert_eq!(ledger.entries.len(), 2);
+        assert!(ledger.entries.iter().any(|e| e.is_reversed));
+        assert!(ledger.entries.iter().any(|e| e.entry_type == "reversal"));
+    }
+
+    #[test]
+    fn reversal_restores_only_real_unallocated_payment_or_receivable() {
+        for reverse_payment in [false, true] {
+            let mut store = MockDataAdapter::new();
+            let customer = store
+                .list_customers(&CustomerQuery {
+                    search: Some("DEMO-03".into()),
+                    active_only: true,
+                })
+                .pop()
+                .unwrap();
+            let payment = store
+                .record_payment(
+                    &customer.id,
+                    &RecordPaymentInput {
+                        received_date: Local::now().date_naive(),
+                        amount_idr: 10_000,
+                        method: "cash".into(),
+                        reference: None,
+                        note: None,
+                    },
+                )
+                .unwrap();
+            let query = LedgerQuery {
+                from: None,
+                to: None,
+                order_desc: false,
+            };
+            let ledger = store.get_ledger(&customer.id, &query).unwrap();
+            let target = ledger
+                .entries
+                .iter()
+                .find(|entry| {
+                    if reverse_payment {
+                        entry.source_id == payment.id
+                    } else {
+                        entry.debit_idr > 0
+                    }
+                })
+                .unwrap();
+            store
+                .reverse_transaction(&customer.id, &target.id, "Uji koreksi")
+                .unwrap();
+            let result = store.get_ledger(&customer.id, &query).unwrap().summary;
+            if reverse_payment {
+                assert_eq!(
+                    (
+                        result.outstanding_idr,
+                        result.customer_credit_idr,
+                        result.ledger_balance_idr
+                    ),
+                    (18_000, 0, 18_000)
+                );
+            } else {
+                assert_eq!(
+                    (
+                        result.outstanding_idr,
+                        result.customer_credit_idr,
+                        result.ledger_balance_idr
+                    ),
+                    (0, 10_000, -10_000)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mock_store_initial_customers_and_example_reconciliation() {
         let store = MockDataAdapter::new();
         let query = CustomerQuery {
             search: None,
             active_only: false,
         };
         let customers = store.list_customers(&query);
-        assert_eq!(customers.len(), 8);
+        assert_eq!(customers.len(), 5);
 
-        // Pastikan DESA SUMBARANG (P017) cocok 100% dengan rekonsiliasi buku riil (Rp 1.938.200)
-        let sumbarang = customers
+        let example = customers
             .iter()
-            .find(|c| c.name == "DESA SUMBARANG")
+            .find(|c| c.name == "Pelanggan Contoh A")
             .unwrap();
-        assert_eq!(sumbarang.code.as_deref(), Some("P017"));
-        assert_eq!(sumbarang.outstanding_idr, 1_938_200);
-        assert_eq!(sumbarang.customer_credit_idr, 0);
+        assert_eq!(example.code.as_deref(), Some("DEMO-01"));
+        assert_eq!(example.outstanding_idr, 100_000);
+        assert_eq!(example.customer_credit_idr, 0);
 
         let ledger = store
             .get_ledger(
-                &sumbarang.id,
+                &example.id,
                 &LedgerQuery {
                     from: None,
                     to: None,
@@ -2008,21 +1735,18 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(ledger.summary.outstanding_idr, 1_938_200);
-        assert_eq!(ledger.summary.ledger_balance_idr, 1_938_200);
-        assert_eq!(
-            ledger.entries.first().unwrap().running_balance_idr,
-            1_938_200
-        );
+        assert_eq!(ledger.summary.outstanding_idr, 100_000);
+        assert_eq!(ledger.summary.ledger_balance_idr, 100_000);
+        assert_eq!(ledger.entries.first().unwrap().running_balance_idr, 100_000);
     }
 
     #[test]
     fn test_new_sale_auto_applies_deposit_fifo() {
         let mut store = MockDataAdapter::new();
-        // Toko Berkah Abadi punya deposit Rp 500.000
+        // Pelanggan contoh memiliki saldo kredit Rp 500.000
         let berkah = store
             .list_customers(&CustomerQuery {
-                search: Some("Berkah".into()),
+                search: Some("Contoh B".into()),
                 active_only: true,
             })
             .into_iter()
@@ -2076,7 +1800,7 @@ mod tests {
         let mut store = MockDataAdapter::new();
         let kec = store
             .list_customers(&CustomerQuery {
-                search: Some("Kecamatan".into()),
+                search: Some("Contoh C".into()),
                 active_only: true,
             })
             .into_iter()
