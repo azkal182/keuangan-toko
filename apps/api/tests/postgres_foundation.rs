@@ -1650,4 +1650,23 @@ async fn credit_sale_slice(pool: PgPool) {
             .count(),
         1
     );
+
+    let pdf_resp = request(
+        &app,
+        Method::GET,
+        &format!("/api/v1/customers/{CUSTOMER_A}/ledger/export-pdf"),
+        Some('c'),
+        None,
+    )
+    .await;
+    assert_eq!(pdf_resp.status(), StatusCode::OK);
+    assert_eq!(
+        pdf_resp.headers().get("content-type").unwrap(),
+        "application/pdf"
+    );
+    let pdf_bytes = axum::body::to_bytes(pdf_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(pdf_bytes.starts_with(b"%PDF-1.4"));
+    assert!(pdf_bytes.ends_with(b"%%EOF\n") || pdf_bytes.ends_with(b"%%EOF"));
 }

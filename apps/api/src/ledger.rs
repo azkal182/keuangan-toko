@@ -1,5 +1,9 @@
-use axum::{Json, extract::State};
-use chrono::NaiveDate;
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, header},
+};
+use chrono::{NaiveDate, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use toko_contracts::{
     PageMeta,
@@ -223,4 +227,125 @@ pub async fn list(
         },
         meta: PageMeta { next_cursor },
     }))
+}
+
+#[derive(sqlx::FromRow)]
+struct UnpaidDbRow {
+    effective_date: Option<NaiveDate>,
+    description: Option<String>,
+    quantity: Option<String>,
+    unit_price_idr: Option<i64>,
+    debit_idr: i64,
+    allocated_idr: i64,
+    remaining_idr: i64,
+}
+
+pub async fn export_bill_pdf(
+    State(pool): State<PgPool>,
+    request: RequestId,
+    RouteId(id): RouteId,
+    Params(query): Params<LedgerQuery>,
+) -> Result<(HeaderMap, Vec<u8>), Failure> {
+    if let (Some(from), Some(to)) = (query.from, query.to)
+        && from > to
+    {
+        return Err(request.invalid(
+            "to",
+            "Tanggal akhir harus setelah atau sama dengan tanggal awal",
+        ));
+    }
+    let mut tx = snapshot(&pool, request).await?;
+    let customer: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT name, code, address FROM customers WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|_| request.internal())?;
+
+    let (customer_name, customer_code, customer_address) = match customer {
+        Some(c) => c,
+        None => return Err(request.missing_customer()),
+    };
+
+    let rows: Vec<UnpaidDbRow> = sqlx::query_as(
+        "WITH debits AS (
+             SELECT e.id, e.effective_date, e.source_order, e.created_at,
+                    e.debit_idr,
+                    coalesce(e.description, item.description, s.reference_no, 'Penjualan') AS description,
+                    coalesce(e.quantity, item.quantity::text) AS quantity,
+                    coalesce(e.unit_price_idr, item.unit_price_idr) AS unit_price_idr,
+                    coalesce(debit_alloc.amount, 0) AS allocated_idr,
+                    (e.debit_idr - coalesce(debit_alloc.amount, 0)) AS remaining_idr
+             FROM receivable_entries e
+             LEFT JOIN credit_sales s ON s.id = e.source_id AND s.customer_id = $1 AND e.entry_type = 'credit_sale'
+             LEFT JOIN LATERAL (
+                 SELECT description, quantity, unit_price_idr FROM credit_sale_items WHERE sale_id = s.id ORDER BY ordinal LIMIT 1
+             ) item ON s.id IS NOT NULL
+             LEFT JOIN LATERAL (
+                 SELECT (SELECT coalesce(sum(a.amount_idr), 0) FROM payment_allocations a JOIN payments ap ON ap.id = a.payment_id
+                         WHERE a.debit_entry_id = e.id AND a.status = 'active' AND ap.customer_id = $1 AND ap.status = 'posted')
+                      + (SELECT coalesce(sum(la.amount_idr), 0) FROM legacy_credit_allocations la WHERE la.debit_entry_id = e.id AND la.status = 'active') AS amount
+             ) debit_alloc ON true
+             WHERE e.customer_id = $1
+               AND e.debit_idr > 0
+               AND (
+                   (e.entry_type = 'legacy_debit' AND NOT EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id = e.id))
+                   OR (e.entry_type = 'credit_sale' AND s.status = 'posted')
+               )
+         )
+         SELECT effective_date, description, quantity, unit_price_idr, debit_idr, allocated_idr, remaining_idr
+         FROM debits
+         WHERE remaining_idr > 0
+           AND ($2::date IS NULL OR effective_date >= $2)
+           AND ($3::date IS NULL OR effective_date <= $3)
+         ORDER BY effective_date NULLS LAST, source_order NULLS LAST, created_at, id",
+    )
+    .bind(id)
+    .bind(query.from)
+    .bind(query.to)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|_| request.internal())?;
+
+    tx.commit().await.map_err(|_| request.internal())?;
+
+    let items: Vec<crate::pdf::UnpaidBillItem> = rows
+        .into_iter()
+        .map(|r| crate::pdf::UnpaidBillItem {
+            effective_date: r.effective_date,
+            description: r.description.unwrap_or_else(|| "Penjualan".into()),
+            quantity: r.quantity,
+            unit_price_idr: r.unit_price_idr,
+            debit_idr: r.debit_idr,
+            allocated_idr: r.allocated_idr,
+            remaining_idr: r.remaining_idr,
+        })
+        .collect();
+
+    let bill_data = crate::pdf::CustomerBillData {
+        customer_id: id,
+        customer_code,
+        customer_name: customer_name.clone(),
+        customer_address,
+        printed_at: Utc::now(),
+        items,
+    };
+
+    let pdf_bytes = crate::pdf::generate_customer_bill_pdf(&bill_data);
+
+    let safe_name: String = customer_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    let filename = format!("Tagihan-{}-{}.pdf", safe_name, Utc::now().format("%Y%m%d"));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/pdf".parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("inline; filename=\"{filename}\"").parse().unwrap(),
+    );
+
+    Ok((headers, pdf_bytes))
 }

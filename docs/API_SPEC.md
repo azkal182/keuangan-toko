@@ -39,6 +39,7 @@ Setiap request mutasi browser menyertakan `X-CSRF-Token` yang cocok dengan token
 | API-104 | `PATCH /api/v1/customers/{id}` | `customers:write` | identitas, `expected_version`; hanya field identitas/status, bukan ledger; konflik `409`. |
 | API-107 | `POST /api/v1/customers/{id}/merge` | `customers:merge` | `target_customer_id`, `reason`, `expected_version`; merge hanya Owner, customer sumber dinonaktifkan, referensi historis dialihkan atomik dan diaudit; tidak menggabungkan ledger event. |
 | API-105 | `GET /api/v1/customers/{id}/ledger` | `ledger:read` | `cursor?`, `limit?`, `from?`, `to?`, `order?` (`asc`/`desc`, default `asc`); entries berurutan, `source_order` tie-breaker, `allocated_idr`, `is_reversed`, summary, balances dan next cursor. |
+| API-108 | `GET /api/v1/customers/{id}/ledger/export-pdf` | `ledger:read` | `from?`, `to?`; menghasilkan dokumen PDF rincian tagihan piutang belum lunas (A4 portrait) berisi kolom No, Tanggal, Uraian Transaksi, Qty, Harga Satuan, Debet (Rp), Kredit (Rp), Saldo Berjalan (Rp) serta ringkasan total dan tanda tangan. |
 | API-106 | `GET /api/v1/customers/{id}/payments` | `payments:read` | cursor; histori penerimaan dan alokasi. |
 
 ## Penjualan dan pembayaran

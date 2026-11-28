@@ -4,6 +4,7 @@ mod error;
 mod imports;
 mod ledger;
 mod payments;
+pub mod pdf;
 mod reports;
 mod sales;
 mod transactions;
@@ -75,6 +76,10 @@ pub fn app(pool: PgPool) -> Router {
         .route(
             "/api/v1/customers/{id}/ledger",
             protected(get(ledger::list), Permission::LedgerRead),
+        )
+        .route(
+            "/api/v1/customers/{id}/ledger/export-pdf",
+            protected(get(ledger::export_bill_pdf), Permission::LedgerRead),
         )
         .route(
             "/api/v1/customers/{id}/payments",

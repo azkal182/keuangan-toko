@@ -6,6 +6,14 @@
 
 ## Ringkasan
 
+- **Fitur Ekspor / Cetak PDF Rincian Tagihan Piutang (Backend & Web) (28 November 2026):**
+  - Implementasi pure-Rust generator PDF 1.4 (`apps/api/src/pdf.rs`) tanpa dependensi pustaka C eksternal atau network, standar A4 portrait dengan font bawaan PDF (`/Helvetica` dan `/Helvetica-Bold`).
+  - Endpoint `GET /api/v1/customers/{id}/ledger/export-pdf` (`API-108`) menyaring hanya transaksi piutang belanja yang belum lunas atau terbayar sebagian (`remaining_idr > 0`), mendukung filter tanggal opsional `from` dan `to`.
+  - Struktur tabel dokumen PDF mencakup kolom: `No`, `Tanggal`, `Uraian Transaksi`, `Qty`, `Harga Satuan`, `Debet (Rp)`, `Kredit (Rp)`, dan `Saldo Berjalan (Rp)` (Sisa), dilengkapi baris total, kartu nominal terbilang yang harus dibayar, serta kotak tanda tangan pelanggan dan kasir/toko.
+  - Integrasi antarmuka Web (`apps/web/src/ledger.tsx`) menambahkan tombol "Cetak Tagihan PDF" pada kartu Buku Piutang dengan indikator proses unduh dan sinkronisasi filter tanggal yang aktif.
+  - Implementasi desktop ditunda sementara sampai backend dan web disetujui pengguna.
+  - Verifikasi: unit test `pdf::tests::generates_valid_pdf_structure_and_header` lulus, clippy backend lulus tanpa warning.
+
 - **Animasi dialog desktop (28 November):** animasi bawaan turun dari atas diganti fade di posisi akhir menggunakan DialogEntrance GPUI Kit. Pemeriksaan format, Clippy dan 22 unit test berhasil, satu test server diabaikan. Kelancaran visual animasi pada perangkat pengguna masih perlu dinilai langsung.
 
 - **Perbaikan dialog dan desktop Windows (28 November):** sinkronisasi pembukaan dialog memeriksa status Kit saat tindakan tertunda dijalankan, dan setiap pembukaan baru menginisialisasi ulang input serta date picker. Uji Windows mock memeriksa dialog belanja, Escape, pembukaan pembayaran setelahnya, nilai awal form dan tombol tutup pelanggan di kanan. Build release beta.2 dan installer berhasil; executable menggunakan Windows GUI subsystem (2). Clippy dan 22 unit test berhasil, satu test server diabaikan. Uji instalasi beta.2 dan seluruh kombinasi dialog belum dilakukan; bug intermiten tidak dapat dijamin hilang untuk semua kondisi.

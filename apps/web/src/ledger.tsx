@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Calendar, Filter, FileText, ArrowRight, RotateCcw } from "lucide-react";
+import { Calendar, Filter, FileText, ArrowRight, RotateCcw, Printer, Loader2 } from "lucide-react";
 import { api, readResult, useResource, type Schema } from "./api";
 import { ErrorNotice } from "./components/presentation";
 import { Button } from "./components/ui/button";
@@ -28,7 +28,41 @@ const entryLabels: Record<string, string> = {
 export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) => void }) {
   const [query, setQuery] = useState<{ from?: string; to?: string; cursors: string[] }>({ cursors: [] });
   const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
+  const [isExporting, setIsExporting] = useState(false);
   const cursor = query.cursors.at(-1);
+
+  const handleExportPdf = async () => {
+    try {
+      setIsExporting(true);
+      const search = new URLSearchParams();
+      if (query.from) search.set("from", query.from);
+      if (query.to) search.set("to", query.to);
+      const url = `/api/v1/customers/${id}/ledger/export-pdf${search.toString() ? `?${search.toString()}` : ""}`;
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) {
+        throw new Error("Gagal mengunduh berkas PDF tagihan");
+      }
+      const contentDisposition = res.headers.get("content-disposition");
+      let filename = `Tagihan-${id}.pdf`;
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Terjadi kesalahan saat mengekspor PDF");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const load = useCallback(
     async (signal: AbortSignal) =>
@@ -94,6 +128,23 @@ export function Ledger({ id, openSale }: { id: string; openSale?: (id: string) =
             >
               <RotateCcw className="h-3 w-3" />
               <span>Reset</span>
+            </Button>
+            <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isExporting}
+              onClick={handleExportPdf}
+              title="Cetak atau unduh dokumen rincian tagihan piutang belum lunas dalam format PDF"
+              className="h-8 text-xs gap-1.5 border-emerald-600/30 text-emerald-800 hover:bg-emerald-50 hover:text-emerald-900 font-medium"
+            >
+              {isExporting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-700" />
+              ) : (
+                <Printer className="h-3.5 w-3.5 text-emerald-700" />
+              )}
+              <span>{isExporting ? "Mencetak..." : "Cetak Tagihan PDF"}</span>
             </Button>
           </form>
         </div>
