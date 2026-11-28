@@ -1,10 +1,15 @@
 # Status Proyek — Keuangan Toko
 
-**Diperbarui:** 27 November 2026
+**Diperbarui:** 28 November 2026
 **Repo kerja:** `D:\azka\keuangan-toko` — dipilih pengguna.
 **Sumber status:** bukti dokumen dan pemeriksaan filesystem/git; bukan klaim aplikasi berjalan.
 
 ## Ringkasan
+
+- **Perbaikan CI GitHub Actions Linux & Konfigurasi Gitignore (28 November 2026):**
+  1. Menambahkan `experiments/` ke `.gitignore` agar berkas eksperimen lokal/cabang lain tidak terdeteksi sebagai perubahan di branch utama (`main`).
+  2. Memperbaiki workflow `.github/workflows/ci-cd.yml` dengan menambahkan `--exclude toko-desktop` pada langkah `cargo clippy` dan `cargo test`. Ini menuntaskan error CI pada runner Ubuntu Linux yang dipicu oleh dependensi upstream `xattr v0.2.3` (dibawa oleh `gpui` pada `toko-desktop`), di mana konstanta `ENOATTR` tidak ada pada Linux glibc `libc`. `toko-desktop` adalah aplikasi desktop native Windows dan bukan bagian dari rilis/deployment web API Linux.
+  3. Verifikasi lokal: `cargo clippy --workspace --exclude toko-desktop --all-targets --all-features --locked -- -D warnings` lulus 0 warning, dan `cargo test --workspace --exclude toko-desktop --locked` lulus seluruh test.
 
 - **Pelonggaran Validasi Tanggal Lampau Belanja/Pembayaran (27 November 2026):**
   Mengizinkan pencatatan belanja (penjualan kredit) dan pembayaran dengan tanggal usaha sebelum hari ini (*backdated*) secara bebas tanpa mewajibkan alasan atau membatasi pada peran Owner. Memperbarui domain `crates/domain/src/sale.rs`, formulir web `apps/web/src/sales.tsx` (alasan backdate dijadikan opsional, batas minimum kalender dihilangkan), dan store desktop `apps/desktop/src/store/mock_store.rs`. Tanggal masa depan tetap diblokir secara ketat untuk menjaga integritas waktu pembukuan. Seluruh unit test (24 unit tests) dan linter clippy lulus 100%.
