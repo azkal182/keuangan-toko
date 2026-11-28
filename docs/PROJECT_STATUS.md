@@ -1,6 +1,6 @@
-# Status Proyek — Keuangan Toko
+﻿# Status Proyek — Keuangan Toko
 
-**Diperbarui:** 27 November 2026
+**Diperbarui:** 28 November 2026
 **Repo kerja:** `D:\azka\keuangan-toko` — dipilih pengguna.
 **Sumber status:** bukti dokumen dan pemeriksaan filesystem/git; bukan klaim aplikasi berjalan.
 
@@ -37,6 +37,22 @@
 - **Fondasi redesign desktop (27 November 2026, parsial):** prototipe GPUI Kit menggunakan DataTable dengan 120 baris sintetis, input pencarian, state kosong/error dan dialog. Build dan clippy prototipe berhasil; sebagian interaksi Windows diamati, namun keyboard, sort, resize, skala dan aksesibilitas penuh masih perlu diuji. Inisialisasi dan tipe navigasi desktop dipisahkan ke `apps/desktop/src/app`; `cargo test -p toko-desktop` berhasil (16 test) dan clippy desktop berhasil. GPUI Kit belum dimigrasikan ke aplikasi utama. Lihat [hasil eksperimen](../experiments/gpui-kit-prototype/README.md) dan [rencana redesign](DESKTOP_REDESIGN_REFACTOR_PLAN.md).
 
 - **Rencana redesign/refactor desktop (27 November 2026):** [DESKTOP_REDESIGN_REFACTOR_PLAN](DESKTOP_REDESIGN_REFACTOR_PLAN.md) mencatat tiga fase fondasi, alur utama, dan pemantapan. Fase 1 belum selesai; pengujian interaksi prototipe dan kompatibilitas migrasi masih diperlukan.
+- **Penerapan Auto-Apply Saldo Kredit Pelanggan (Deposit) ke Belanja Baru (Opsi A) (28 November 2026):**
+  1. Menyelaraskan kebijakan OQ-04 ADR-007 atas instruksi pengguna (Opsi A, OQ-28): transaksi penjualan kredit baru kini secara otomatis menyerap saldo kredit pelanggan / deposit yang tersedia secara FIFO kronologis.
+  2. Menambahkan migrasi `migrations/postgres/0009_auto_apply_credits.sql`:
+     - Memperbarui trigger `validate_legacy_credit_allocation` agar saldo deposit historis (`legacy_payment`) dapat dialokasikan ke penjualan kredit baru (`credit_sale`).
+     - Menjalankan rekonsiliasi otomatis seluruh saldo kredit terbuka terhadap debit terbuka yang belum lunas (termasuk menuntaskan kasus transaksi Rp 38.100 DESA SUMBARANG sehingga langsung lunas dan saldo deposit menjadi Rp 400.000).
+  3. Mengimplementasikan fungsi `payments::auto_apply_credits` pada backend API (`apps/api/src/payments.rs`) dan memanggilnya di `sales::post` serta `payments::post`.
+  4. Menyelaraskan assertion test integrasi `apps/api/tests/postgres_foundation.rs` (penjualan baru menyerap kredit 20.000 sehingga outstanding menjadi 69.552 dan deposit menjadi 0).
+  5. Menyelaraskan store desktop (`apps/desktop/src/store/mock_store.rs`) dan unit test `test_new_sale_auto_applies_deposit_fifo` (16 unit tests desktop lulus).
+  6. Seluruh kode lolos clippy 0 warning dan unit test workspace lulus.
+
+- **Perbaikan CI GitHub Actions Linux & Konfigurasi Gitignore (28 November 2026):**
+  1. Menambahkan `experiments/` ke `.gitignore` agar berkas eksperimen lokal/cabang lain tidak terdeteksi sebagai perubahan di branch utama (`main`).
+  2. Memperbaiki workflow `.github/workflows/ci-cd.yml` dengan menambahkan `--exclude toko-desktop` pada langkah `cargo clippy` dan `cargo test`. Ini menuntaskan error CI pada runner Ubuntu Linux yang dipicu oleh dependensi upstream `xattr v0.2.3` (dibawa oleh `gpui` pada `toko-desktop`), di mana konstanta `ENOATTR` tidak ada pada Linux glibc `libc`. `toko-desktop` adalah aplikasi desktop native Windows dan bukan bagian dari rilis/deployment web API Linux.
+  3. Menyelaraskan assertion pengujian integrasi `apps/api/tests/postgres_foundation.rs` dengan kebijakan pelonggaran tanggal lampau (penjualan kredit backdate kini diizinkan bagi Operator maupun Owner tanpa wajib alasan, sehingga ekspektasi status berubah dari 403/422 menjadi 201 Created).
+  4. Menyelaraskan `apps/api/Dockerfile` dengan menyertakan `apps/desktop/Cargo.toml` dan stub `main.rs` agar Cargo workspace member valid saat Docker build API image di CI tanpa mengompilasi dependensi desktop.
+  5. Verifikasi lokal: `cargo clippy --workspace --exclude toko-desktop --all-targets --all-features --locked -- -D warnings` lulus 0 warning, dan `cargo test --workspace --exclude toko-desktop --locked` lulus seluruh test.
 
 - **Pelonggaran Validasi Tanggal Lampau Belanja/Pembayaran (27 November 2026):**
   Mengizinkan pencatatan belanja (penjualan kredit) dan pembayaran dengan tanggal usaha sebelum hari ini (*backdated*) secara bebas tanpa mewajibkan alasan atau membatasi pada peran Owner. Memperbarui domain `crates/domain/src/sale.rs`, formulir web `apps/web/src/sales.tsx` (alasan backdate dijadikan opsional, batas minimum kalender dihilangkan), dan store desktop `apps/desktop/src/store/mock_store.rs`. Tanggal masa depan tetap diblokir secara ketat untuk menjaga integritas waktu pembukuan. Seluruh unit test (24 unit tests) dan linter clippy lulus 100%.

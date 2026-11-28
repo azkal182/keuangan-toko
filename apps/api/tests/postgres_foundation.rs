@@ -1412,19 +1412,15 @@ async fn credit_sale_slice(pool: PgPool) {
     let mut dates = initial.clone();
     dates["effective_date"] = serde_json::json!(today.pred_opt().unwrap());
     assert_eq!(
-        create('b', &operator, Some("backdate"), &dates)
+        create('b', &operator, Some("backdate-op"), &dates)
             .await
             .status(),
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        create('a', &owner, Some("backdate"), &dates).await.status(),
-        StatusCode::UNPROCESSABLE_ENTITY
+        StatusCode::CREATED
     );
     let mut dated_with_reason = dates.clone();
     dated_with_reason["backdate_reason"] = serde_json::json!("Pembukuan hari sebelumnya");
     assert_eq!(
-        create('a', &owner, Some("backdate"), &dated_with_reason)
+        create('a', &owner, Some("backdate-owner"), &dated_with_reason)
             .await
             .status(),
         StatusCode::CREATED
@@ -1534,8 +1530,9 @@ async fn credit_sale_slice(pool: PgPool) {
     let posted = json(first).await;
     assert_eq!(json(concurrent).await, posted);
     assert_eq!(posted["data"]["sale"]["status"], "posted");
-    assert_eq!(posted["data"]["balance"]["outstanding_idr"], "89552");
-    assert_eq!(posted["data"]["balance"]["customer_credit_idr"], "20000");
+    // Sesuai OQ-28 (Auto-apply deposit): Saldo kredit 20.000 otomatis menyerap penjualan sehingga outstanding menjadi 69552 dan deposit menjadi 0
+    assert_eq!(posted["data"]["balance"]["outstanding_idr"], "69552");
+    assert_eq!(posted["data"]["balance"]["customer_credit_idr"], "0");
 
     let replay = sale_request(
         &app,

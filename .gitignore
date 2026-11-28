@@ -9,3 +9,4 @@ docs/files/*.xlsx
 /experiments/gpui-kit-prototype/target/
 node_modules/
 /apps/web/dist/
+experiments/

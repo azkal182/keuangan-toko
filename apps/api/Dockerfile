@@ -3,10 +3,12 @@ ENV RUSTUP_TOOLCHAIN=1.100.0
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY apps/api/Cargo.toml apps/api/Cargo.toml
+COPY apps/desktop/Cargo.toml apps/desktop/Cargo.toml
 COPY crates/application/Cargo.toml crates/application/Cargo.toml
 COPY crates/contracts/Cargo.toml crates/contracts/Cargo.toml
 COPY crates/domain/Cargo.toml crates/domain/Cargo.toml
 COPY crates/money/Cargo.toml crates/money/Cargo.toml
+RUN mkdir -p apps/desktop/src && echo "fn main() {}" > apps/desktop/src/main.rs
 COPY apps/api/src apps/api/src
 COPY apps/api/tests apps/api/tests
 COPY crates crates
