@@ -12,8 +12,9 @@
      - Memperbarui trigger `validate_legacy_credit_allocation` agar saldo deposit historis (`legacy_payment`) dapat dialokasikan ke penjualan kredit baru (`credit_sale`).
      - Menjalankan rekonsiliasi otomatis seluruh saldo kredit terbuka terhadap debit terbuka yang belum lunas (termasuk menuntaskan kasus transaksi Rp 38.100 DESA SUMBARANG sehingga langsung lunas dan saldo deposit menjadi Rp 400.000).
   3. Mengimplementasikan fungsi `payments::auto_apply_credits` pada backend API (`apps/api/src/payments.rs`) dan memanggilnya di `sales::post` serta `payments::post`.
-  4. Menyelaraskan store desktop (`apps/desktop/src/store/mock_store.rs`) dan unit test `test_new_sale_auto_applies_deposit_fifo` (16 unit tests desktop lulus).
-  5. Seluruh kode lolos clippy 0 warning dan unit test workspace lulus.
+  4. Menyelaraskan assertion test integrasi `apps/api/tests/postgres_foundation.rs` (penjualan baru menyerap kredit 20.000 sehingga outstanding menjadi 69.552 dan deposit menjadi 0).
+  5. Menyelaraskan store desktop (`apps/desktop/src/store/mock_store.rs`) dan unit test `test_new_sale_auto_applies_deposit_fifo` (16 unit tests desktop lulus).
+  6. Seluruh kode lolos clippy 0 warning dan unit test workspace lulus.
 
 - **Perbaikan CI GitHub Actions Linux & Konfigurasi Gitignore (28 November 2026):**
   1. Menambahkan `experiments/` ke `.gitignore` agar berkas eksperimen lokal/cabang lain tidak terdeteksi sebagai perubahan di branch utama (`main`).

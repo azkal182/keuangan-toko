@@ -1530,8 +1530,9 @@ async fn credit_sale_slice(pool: PgPool) {
     let posted = json(first).await;
     assert_eq!(json(concurrent).await, posted);
     assert_eq!(posted["data"]["sale"]["status"], "posted");
-    assert_eq!(posted["data"]["balance"]["outstanding_idr"], "89552");
-    assert_eq!(posted["data"]["balance"]["customer_credit_idr"], "20000");
+    // Sesuai OQ-28 (Auto-apply deposit): Saldo kredit 20.000 otomatis menyerap penjualan sehingga outstanding menjadi 69552 dan deposit menjadi 0
+    assert_eq!(posted["data"]["balance"]["outstanding_idr"], "69552");
+    assert_eq!(posted["data"]["balance"]["customer_credit_idr"], "0");
 
     let replay = sale_request(
         &app,
