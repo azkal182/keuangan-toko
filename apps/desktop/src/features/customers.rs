@@ -124,23 +124,19 @@ impl Desktop {
                                 },
                             )
                             .child(
-                                secondary_action_button(
-                                    if self.customer_active_only {
+                                Button::new("tool-cust-filter-active")
+                                    .outline()
+                                    .label(if self.customer_active_only {
                                         "Filter: Hanya Aktif"
                                     } else {
                                         "Filter: Semua Status"
-                                    },
-                                    "",
-                                )
-                                .id("tool-cust-filter-active")
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
+                                    })
+                                    .on_click(cx.listener(|this, _, _, cx| {
                                         this.customer_active_only = !this.customer_active_only;
                                         this.customer_page = 0;
                                         this.selected_customer_id = None;
                                         cx.notify();
-                                    },
-                                )),
+                                    })),
                             ),
                     )
                     // Komponen input GPUI Kit menangani editing, clipboard, dan IME.

@@ -1,3 +1,4 @@
+pub(crate) mod account_table;
 mod accounts;
 mod aging;
 pub(crate) mod aging_table;

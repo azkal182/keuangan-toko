@@ -66,8 +66,7 @@ impl Desktop {
                             .items_center()
                             .gap(px(6.0))
                             .child(
-                                secondary_action_button("← Kembali ke Ringkasan", "Esc")
-                                    .id("tool-det-back")
+                                Button::new("tool-det-back").outline().label("← Kembali ke Ringkasan")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.current_view = CurrentView::CustomerList;
                                         cx.notify();
@@ -95,23 +94,6 @@ impl Desktop {
                                                 cx.notify();
                                             })),
                                     )
-                                    // Tombol Terapkan Saldo Kredit HANYA muncul jika pelanggan punya saldo kredit > 0
-                                    .when(has_credit, |d2| {
-                                        d2.child(
-                                            accent_action_button(
-                                                "Terapkan Saldo Kredit",
-                                                "F5",
-                                                Theme::BADGE_DEPOSIT_TEXT,
-                                                Theme::BADGE_DEPOSIT_BG,
-                                                Theme::BADGE_DEPOSIT_BORDER,
-                                            )
-                                            .id("tool-det-apply-credit")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.open_apply_deposit_modal_for_payment(None, cx);
-                                                cx.notify();
-                                            })),
-                                        )
-                                    })
                             }),
                     )
                     // Right: Master Customer Actions (Ubah Data & Merge)
@@ -122,8 +104,7 @@ impl Desktop {
                             .gap(px(6.0))
                             .when(self.can_write(), |d| {
                                 d.child(
-                                    secondary_action_button("Ubah Data Pelanggan", "Ctrl+E")
-                                        .id("tool-det-edit-cust")
+                                    Button::new("tool-det-edit-cust").outline().label("Ubah data pelanggan")
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.open_edit_customer_modal();
                                             cx.notify();
@@ -132,8 +113,7 @@ impl Desktop {
                             })
                             .when(self.is_owner(), |d| {
                                 d.child(
-                                    secondary_action_button("Gabungkan (Merge)", "Ctrl+M")
-                                        .id("tool-det-merge-cust")
+                                    Button::new("tool-det-merge-cust").outline().label("Gabungkan")
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.open_merge_customer_modal();
                                             cx.notify();
@@ -349,15 +329,13 @@ impl Desktop {
                                     .items_center()
                                     .gap(px(6.0))
                                     .child(
-                                        secondary_action_button(
+                                        Button::new("btn-ledger-date-filter").outline().label(
                                             if has_date_filter {
                                                 "Filter Tanggal: Aktif"
                                             } else {
                                                 "Filter Periode Tanggal..."
-                                            },
-                                            "",
+                                            }
                                         )
-                                        .id("btn-ledger-date-filter")
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.open_filter_ledger_date_modal();
                                             cx.notify();
@@ -365,8 +343,7 @@ impl Desktop {
                                     )
                                     .when(has_date_filter, |d| {
                                         d.child(
-                                            secondary_action_button("Reset Tanggal", "")
-                                                .id("btn-ledger-date-reset")
+                                            Button::new("btn-ledger-date-reset").outline().label("Reset tanggal")
                                                 .on_click(cx.listener(|this, _, _, cx| {
                                                     this.ledger_from = None;
                                                     this.ledger_to = None;

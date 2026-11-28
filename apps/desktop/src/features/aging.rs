@@ -89,8 +89,7 @@ impl Desktop {
                             )
                             .child(tool_separator())
                             .child(
-                                primary_action_button("Ubah Tanggal Acuan (As Of)...", "")
-                                    .id("tool-aging-date")
+                                Button::new("tool-aging-date").primary().label("Ubah tanggal acuan")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.open_change_as_of_modal();
                                         cx.notify();
@@ -98,8 +97,7 @@ impl Desktop {
                             )
                             .when(self.aging_as_of != self.today_jakarta(), |d| {
                                 d.child(
-                                    secondary_action_button("Reset ke Hari Ini", "")
-                                        .id("tool-aging-reset-date")
+                                    Button::new("tool-aging-reset-date").outline().label("Reset ke hari ini")
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.aging_as_of = this.today_jakarta();
                                             this.status_msg =
@@ -117,8 +115,7 @@ impl Desktop {
                             .gap(px(6.0))
                             .when(self.aging_selected_bucket.is_some(), |d| {
                                 d.child(
-                                    secondary_action_button("Tampilkan Semua Kelompok Umur", "")
-                                        .id("tool-aging-clear-bucket")
+                                    Button::new("tool-aging-clear-bucket").outline().label("Tampilkan semua kelompok umur")
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.aging_selected_bucket = None;
                                             cx.notify();

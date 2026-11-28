@@ -102,4 +102,6 @@ Rujuk FR/AC yang relevan dalam [FEATURE_SPECIFICATIONS](FEATURE_SPECIFICATIONS.m
 
 **Lanjutan root dialog:** modal sekarang menggunakan pengelola Dialog GPUI Kit dengan view terpisah. Uji Windows mock memeriksa pembukaan dan penyimpanan pelanggan, date picker, Escape dari tinjauan dan konfirmasi pembayaran dengan Enter; saldo sesudah pembayaran Rp1.000 adalah Rp99.000. Pemeriksaan lengkap seluruh form, role, ukuran layar dan focus trap masih diperlukan.
 
+**Audit komponen:** tabel akun menggunakan DataTable; tombol tindakan, tab, sidebar, role mock, hapus barang, dan kartu filter umur menggunakan Button GPUI Kit. Uji Windows mock memeriksa tabel akun, pembatasan akun sendiri, sidebar, detail dan filter umur. Layout dan konten noninteraktif tetap menggunakan primitive GPUI. Pemeriksaan komprehensif semua role, ukuran, aksesibilitas, HTTP dan jaringan lambat masih diperlukan.
+
 **Belum selesai:** migrasikan input, dialog dan tabel tersisa ke komponen GPUI Kit; audit seluruh jalur request yang masih sinkron, termasuk kode fitur yang disembunyikan; uji loading/error/timeout dan pencegahan klik ganda dengan koneksi lambat, transaksi dengan server uji, interaksi keyboard secara menyeluruh, banyak pelanggan, dan resize. Belum ada jaminan idempotency lintas percobaan sesudah respons hilang; pengguna perlu memeriksa hasil transaksi sebelum mencoba lagi.

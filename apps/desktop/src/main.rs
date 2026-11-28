@@ -13,6 +13,7 @@ pub mod store;
 pub mod ui;
 
 use chrono::{Local, NaiveDate};
+use features::account_table::AccountRows;
 use features::aging_table::AgingRows;
 use features::customer_table::CustomerRows;
 use features::detail_data::{DetailData, DetailKey};
@@ -25,24 +26,19 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::calendar::Date;
 use gpui_kit::component::date_picker::{DatePickerEvent, DatePickerState};
+use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::table::{TableEvent, TableState};
 use store::mock_store::compute_line_total_half_up;
 use store::*;
-use ui::db_grid::{
-    ColumnAlign, GridColumn, grid_badge, grid_cell, grid_cell_styled, grid_row_indicator,
-    render_empty_state, render_grid_header, render_loading_state, render_pagination_bar,
-};
+use ui::db_grid::{render_empty_state, render_loading_state, render_pagination_bar};
 use ui::menu_bar::{
     render_left_sidebar_container, render_system_menu_bar, sidebar_nav_item, sidebar_section_header,
 };
 use ui::modal::ModalDialog;
 use ui::status_bar::StatusBar;
 use ui::theme::{Theme, format_accounting_rupiah, format_rupiah};
-use ui::tool_bar::{
-    accent_action_button, primary_action_button, render_toolbar_container, secondary_action_button,
-    tool_separator,
-};
+use ui::tool_bar::{render_toolbar_container, tool_separator};
 
 use app::build_store_from_env;
 use app::navigation::{ActiveModal, CurrentView, CustomerTab};
@@ -96,6 +92,7 @@ pub struct Desktop {
     sale_inputs: Vec<Vec<Entity<InputState>>>,
     sale_input_subscriptions: Vec<Subscription>,
     sale_inputs_initialized: bool,
+    sale_action_focus: Vec<FocusHandle>,
     date_pickers: Vec<Entity<DatePickerState>>,
     _date_subscriptions: Vec<Subscription>,
     picker_modal: Option<ActiveModal>,
@@ -103,6 +100,8 @@ pub struct Desktop {
     _customer_table_subscription: Subscription,
     aging_table: Entity<TableState<AgingRows>>,
     _aging_table_subscription: Subscription,
+    account_table: Entity<TableState<AccountRows>>,
+    _account_table_subscription: Subscription,
     ledger_table: Entity<TableState<LedgerRows>>,
     payment_table: Entity<TableState<PaymentRows>>,
     _payment_table_subscription: Subscription,
@@ -125,7 +124,8 @@ pub struct Desktop {
     form_error: String,
     // State khusus form penjualan multi-item
     sale_items: Vec<(String, String, String)>, // (uraian, qty, harga_satuan)
-    sale_active_field: (usize, usize), // (row_index, col_index: 0=desc, 1=qty, 2=price, 99=header_fields)
+    // Rows 0..len are items, len is header fields, and len + 1 is action buttons.
+    sale_active_field: (usize, usize),
     // State khusus aging report
     aging_as_of: NaiveDate,
     aging_result: Option<(NaiveDate, Result<AgingReport, AppError>)>,
@@ -163,6 +163,7 @@ impl Render for DesktopDialogView {
                 .track_focus(&desktop.dialog_focus)
                 .on_action(cx.listener(|this, _: &ModalNextField, window, cx| {
                     if this.active_modal.is_some() && !this.reviewing_transaction {
+                        this.sync_sale_action_focus(window);
                         this.next_modal_field();
                         this.focus_active_modal_field(window, cx);
                         cx.notify();
@@ -171,6 +172,7 @@ impl Render for DesktopDialogView {
                 }))
                 .on_action(cx.listener(|this, _: &ModalPreviousField, window, cx| {
                     if this.active_modal.is_some() && !this.reviewing_transaction {
+                        this.sync_sale_action_focus(window);
                         this.previous_modal_field();
                         this.focus_active_modal_field(window, cx);
                         cx.notify();
@@ -185,13 +187,24 @@ impl Render for DesktopDialogView {
 }
 
 impl Desktop {
+    fn sync_sale_action_focus(&mut self, window: &Window) {
+        if self.active_modal == Some(ActiveModal::RecordSale) {
+            if let Some(index) = self
+                .sale_action_focus
+                .iter()
+                .position(|focus| focus.is_focused(window))
+            {
+                self.sale_active_field = (self.sale_items.len() + 1, index);
+            }
+        }
+    }
     fn uses_generic_inputs(&self) -> bool {
         matches!(self.active_modal, Some(ref modal) if !matches!(modal, ActiveModal::Login | ActiveModal::Notice { .. }))
     }
     fn date_field_index(&self, slot: usize) -> Option<usize> {
         match (&self.active_modal, slot) {
             (Some(ActiveModal::RecordSale), 0) => Some(0),
-            (Some(ActiveModal::RecordPayment), 0) => Some(1),
+            (Some(ActiveModal::RecordPayment), 0) => Some(0),
             (Some(ActiveModal::ChangeAsOfDate), 0) => Some(0),
             (Some(ActiveModal::FilterLedgerDate), 0 | 1) => Some(slot),
             _ => None,
@@ -203,6 +216,14 @@ impl Desktop {
             let (row, col) = self.sale_active_field;
             if row < self.sale_inputs.len() {
                 window.focus(&self.sale_inputs[row][col].read(cx).focus_handle(cx), cx);
+                return;
+            }
+            if row > self.sale_items.len() {
+                window.focus(&self.sale_action_focus[col], cx);
+                return;
+            }
+            if col == 0 {
+                window.focus(&self.date_pickers[0].read(cx).focus_handle(cx), cx);
                 return;
             }
             if col != 0 {
@@ -333,14 +354,19 @@ impl Desktop {
                 } else if r + 1 < self.sale_items.len() {
                     self.sale_active_field = (r + 1, 0);
                 } else {
-                    self.sale_active_field = (self.sale_items.len(), 0);
+                    self.sale_active_field = (self.sale_items.len() + 1, 0);
                 }
-            } else if !self.form_fields.is_empty() {
-                let next = (c + 1) % self.form_fields.len();
-                self.sale_active_field = if next == 0 {
-                    (0, 0)
+            } else if r == self.sale_items.len() {
+                self.sale_active_field = if c + 1 < self.form_fields.len() {
+                    (r, c + 1)
                 } else {
-                    (self.sale_items.len(), next)
+                    (0, 0)
+                };
+            } else {
+                self.sale_active_field = if c < 2 {
+                    (r, c + 1)
+                } else {
+                    (self.sale_items.len(), 0)
                 };
             }
         } else if !self.form_fields.is_empty() {
@@ -359,10 +385,16 @@ impl Desktop {
                 } else if !self.form_fields.is_empty() {
                     self.sale_active_field = (self.sale_items.len(), self.form_fields.len() - 1);
                 }
+            } else if row > self.sale_items.len() {
+                self.sale_active_field = if col > 0 {
+                    (row, col - 1)
+                } else {
+                    (self.sale_items.len() - 1, 2)
+                };
             } else if col > 0 {
                 self.sale_active_field = (self.sale_items.len(), col - 1);
-            } else if !self.sale_items.is_empty() {
-                self.sale_active_field = (self.sale_items.len() - 1, 2);
+            } else {
+                self.sale_active_field = (self.sale_items.len() + 1, 2);
             }
         } else if !self.form_fields.is_empty() {
             self.form_active =
@@ -394,6 +426,11 @@ impl Desktop {
             .collect();
         let customer_table = cx.new(|cx| TableState::new(CustomerRows::default(), window, cx));
         let aging_table = cx.new(|cx| TableState::new(AgingRows::default(), window, cx));
+        let account_table = cx.new(|cx| TableState::new(AccountRows::default(), window, cx));
+        let account_subscription = cx
+            .subscribe(&account_table, |_: &mut Self, _, _: &TableEvent, cx| {
+                cx.notify()
+            });
         let ledger_table = cx.new(|cx| TableState::new(LedgerRows::default(), window, cx));
         let payment_table = cx.new(|cx| TableState::new(PaymentRows::default(), window, cx));
         let payment_subscription = cx
@@ -555,6 +592,7 @@ impl Desktop {
             sale_inputs: Vec::new(),
             sale_input_subscriptions: Vec::new(),
             sale_inputs_initialized: false,
+            sale_action_focus: (0..3).map(|_| cx.focus_handle()).collect(),
             date_pickers,
             _date_subscriptions: date_subscriptions,
             picker_modal: None,
@@ -562,6 +600,8 @@ impl Desktop {
             _customer_table_subscription: table_subscription,
             aging_table,
             _aging_table_subscription: aging_subscription,
+            account_table,
+            _account_table_subscription: account_subscription,
             ledger_table,
             payment_table,
             _payment_table_subscription: payment_subscription,
@@ -755,16 +795,12 @@ impl Desktop {
             return;
         }
         self.form_fields = vec![
-            ("Tanggal Transaksi", self.today_jakarta().to_string()),
+            ("Tanggal Transaksi", String::new()),
             ("No. Referensi / Nota (Opsional)", String::new()),
-            (
-                "Alasan Tanggal Lampau / Backdate (Wajib & khusus Owner jika tanggal < hari ini)",
-                String::new(),
-            ),
         ];
         self.sale_items = vec![("".into(), "1".into(), "".into())];
         self.sale_inputs_initialized = false;
-        self.sale_active_field = (0, 0);
+        self.sale_active_field = (self.sale_items.len(), 0);
         self.form_active = 0;
         self.form_error.clear();
         self.active_modal = Some(ActiveModal::RecordSale);
@@ -784,11 +820,11 @@ impl Desktop {
             return;
         }
         self.form_fields = vec![
+            ("Tanggal Diterima", String::new()),
             (
                 "Nominal Pembayaran Diterima (Rp - Bilangan Bulat > 0)",
                 String::new(),
             ),
-            ("Tanggal Diterima", self.today_jakarta().to_string()),
             (
                 "Metode Pembayaran (ketik: Tunai / Transfer Bank)",
                 "Tunai".into(),
@@ -801,6 +837,7 @@ impl Desktop {
         self.active_modal = Some(ActiveModal::RecordPayment);
     }
 
+    #[allow(dead_code)]
     pub fn open_apply_deposit_modal_for_payment(
         &mut self,
         preferred_payment_id: Option<String>,
@@ -1536,13 +1573,17 @@ impl Desktop {
                     return;
                 };
                 let date_str = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                if date_str.is_empty() {
+                    self.form_error = "Pilih tanggal transaksi terlebih dahulu.".into();
+                    cx.notify();
+                    return;
+                }
                 let Ok(effective_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
                     self.form_error = "Format Tanggal Transaksi harus YYYY-MM-DD.".into();
                     cx.notify();
                     return;
                 };
                 let ref_raw = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
-                let reason_raw = self.form_fields.get(2).map(|f| f.1.trim()).unwrap_or("");
 
                 let mut items = Vec::new();
                 for (desc, qty, price_str) in &self.sale_items {
@@ -1569,11 +1610,7 @@ impl Desktop {
                     } else {
                         Some(ref_raw.to_string())
                     },
-                    backdate_reason: if reason_raw.is_empty() {
-                        None
-                    } else {
-                        Some(reason_raw.to_string())
-                    },
+                    backdate_reason: None,
                     items,
                 };
 
@@ -1635,17 +1672,21 @@ impl Desktop {
                 let Some(cid) = self.selected_customer_id.clone() else {
                     return;
                 };
-                let amt_raw = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
-                let Some(amount_idr) = parse_money_input(amt_raw) else {
-                    self.form_error =
-                        "Nominal pembayaran harus berupa rupiah bulat yang valid.".into();
+                let date_str = self.form_fields.get(0).map(|f| f.1.trim()).unwrap_or("");
+                if date_str.is_empty() {
+                    self.form_error = "Pilih tanggal pembayaran terlebih dahulu.".into();
+                    cx.notify();
+                    return;
+                }
+                let Ok(received_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+                    self.form_error = "Format Tanggal Diterima harus YYYY-MM-DD.".into();
                     cx.notify();
                     return;
                 };
-
-                let date_str = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
-                let Ok(received_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
-                    self.form_error = "Format Tanggal Diterima harus YYYY-MM-DD.".into();
+                let amt_raw = self.form_fields.get(1).map(|f| f.1.trim()).unwrap_or("");
+                let Some(amount_idr) = parse_money_input(amt_raw) else {
+                    self.form_error =
+                        "Nominal pembayaran harus berupa rupiah bulat yang valid.".into();
                     cx.notify();
                     return;
                 };
@@ -2169,12 +2210,6 @@ impl Desktop {
                     cx.notify();
                 }
             }
-            "f5" => {
-                if self.current_view == CurrentView::CustomerDetail {
-                    self.open_apply_deposit_modal_for_payment(None, cx);
-                    cx.notify();
-                }
-            }
             "f6" => {
                 self.current_view = CurrentView::AgingReport;
                 self.status_msg = "Modul: Laporan Analisis Umur Piutang (Aging Report).".into();
@@ -2314,7 +2349,7 @@ impl Render for Desktop {
                         let subscription = cx.subscribe_in(
                             &input,
                             window,
-                            move |this: &mut Self, input, event, _, cx| {
+                            move |this: &mut Self, input, event, window, cx| {
                                 if this.active_modal != Some(ActiveModal::RecordSale)
                                     || !this.sale_inputs_initialized
                                 {
@@ -2333,7 +2368,23 @@ impl Render for Desktop {
                                         this.form_error.clear();
                                         cx.notify();
                                     }
-                                    InputEvent::Focus => this.sale_active_field = (row, col),
+                                    InputEvent::Focus => {
+                                        this.sale_active_field = (row, col);
+                                        if col == 1 {
+                                            let input = input.clone();
+                                            cx.defer_in(window, move |_, window, cx| {
+                                                if input
+                                                    .read(cx)
+                                                    .focus_handle(cx)
+                                                    .is_focused(window)
+                                                {
+                                                    input.update(cx, |state, cx| {
+                                                        state.select_all(window, cx)
+                                                    });
+                                                }
+                                            });
+                                        }
+                                    }
                                     InputEvent::PressEnter { .. } => this.submit_modal(cx),
                                     _ => {}
                                 }
@@ -2523,6 +2574,7 @@ impl Render for Desktop {
             })
             .on_action(cx.listener(|this, _: &ModalNextField, window, cx| {
                 if this.active_modal.is_some() && !this.reviewing_transaction {
+                    this.sync_sale_action_focus(window);
                     this.next_modal_field();
                     this.focus_active_modal_field(window, cx);
                     cx.notify();
@@ -2531,6 +2583,7 @@ impl Render for Desktop {
             }))
             .on_action(cx.listener(|this, _: &ModalPreviousField, window, cx| {
                 if this.active_modal.is_some() && !this.reviewing_transaction {
+                    this.sync_sale_action_focus(window);
                     this.previous_modal_field();
                     this.focus_active_modal_field(window, cx);
                     cx.notify();
@@ -2613,12 +2666,12 @@ impl Render for Desktop {
                                     .child(sidebar_section_header("MODUL UTAMA"))
                                     .child(
                                         sidebar_nav_item(
+                                            "side-nav-cust-list",
                                             "▤",
                                             "Ringkasan Pelanggan",
                                             "F2",
                                             self.current_view == CurrentView::CustomerList,
                                         )
-                                        .id("side-nav-cust-list")
                                         .on_click(
                                             cx.listener(|this, _, _, cx| {
                                                 this.current_view = CurrentView::CustomerList;
@@ -2649,32 +2702,28 @@ impl Render for Desktop {
                                             .items_center()
                                             .gap(px(4.0))
                                             .child(
-                                                div()
-                                                    .id(format!("open-customer-select-{}", id))
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
-                                                    .cursor_pointer()
-                                                    .text_size(px(11.0))
-                                                    .text_color(rgb(Theme::TEXT_PRIMARY))
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.selected_customer_id =
-                                                            Some(customer_id.clone());
-                                                        this.current_view =
-                                                            CurrentView::CustomerDetail;
-                                                        this.ledger_page_idx = 0;
-                                                        this.payment_page_idx = 0;
-                                                        cx.notify();
-                                                    }))
-                                                    .child(name.clone()),
+                                                Button::new(format!("open-customer-select-{}", id))
+                                                    .ghost()
+                                                    .label(name.clone())
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            this.selected_customer_id =
+                                                                Some(customer_id.clone());
+                                                            this.current_view =
+                                                                CurrentView::CustomerDetail;
+                                                            this.ledger_page_idx = 0;
+                                                            this.payment_page_idx = 0;
+                                                            cx.notify();
+                                                        },
+                                                    )),
                                             )
                                             .child(
-                                                div()
-                                                    .id(format!("open-customer-close-{}", id))
-                                                    .px(px(5.0))
-                                                    .cursor_pointer()
-                                                    .child("x")
+                                                Button::new(format!("open-customer-close-{}", id))
+                                                    .ghost()
+                                                    .label("×")
+                                                    .accessibility_label(format!(
+                                                        "Tutup detail {name}"
+                                                    ))
                                                     .on_click(cx.listener(
                                                         move |this, _, _, cx| {
                                                             this.open_customers
@@ -2698,12 +2747,12 @@ impl Render for Desktop {
                                     }))
                                     .child(
                                         sidebar_nav_item(
+                                            "side-nav-aging",
                                             "◷",
                                             "Laporan Umur Piutang",
                                             "F6",
                                             self.current_view == CurrentView::AgingReport,
                                         )
-                                        .id("side-nav-aging")
                                         .on_click(
                                             cx.listener(|this, _, _, cx| {
                                                 this.current_view = CurrentView::AgingReport;
@@ -2715,12 +2764,12 @@ impl Render for Desktop {
                                     .when(is_owner, |d| {
                                         d.child(
                                             sidebar_nav_item(
+                                                "side-nav-users",
                                                 "⚙",
                                                 "Manajemen Pengguna",
                                                 "F8",
                                                 self.current_view == CurrentView::UserManagement,
                                             )
-                                            .id("side-nav-users")
                                             .on_click(
                                                 cx.listener(|this, _, _, cx| {
                                                     this.current_view = CurrentView::UserManagement;
@@ -2730,20 +2779,34 @@ impl Render for Desktop {
                                         )
                                     })
                                     .child(
-                                        sidebar_nav_item("🔑", "Ubah Kata Sandi", "Ctrl+P", false)
-                                            .id("side-nav-pw")
-                                            .on_click(cx.listener(|this, _, _, cx| {
+                                        sidebar_nav_item(
+                                            "side-nav-pw",
+                                            "🔑",
+                                            "Ubah Kata Sandi",
+                                            "Ctrl+P",
+                                            false,
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
                                                 this.open_change_password_modal();
                                                 cx.notify();
-                                            })),
+                                            }),
+                                        ),
                                     )
                                     .child(
-                                        sidebar_nav_item("⇄", "Logout", "Ctrl+L", false)
-                                            .id("side-nav-login")
-                                            .on_click(cx.listener(|this, _, _, cx| {
+                                        sidebar_nav_item(
+                                            "side-nav-login",
+                                            "⇄",
+                                            "Logout",
+                                            "Ctrl+L",
+                                            false,
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
                                                 this.logout(cx);
                                                 cx.notify();
-                                            })),
+                                            }),
+                                        ),
                                     ),
                             )
                             // Bottom Docked Session & Shortcut Panel
@@ -2805,29 +2868,15 @@ impl Desktop {
         let is_current = self
             .session
             .as_ref()
-            .map(|s| s.role == role)
-            .unwrap_or(false);
-        div()
-            .id(id)
-            .when(!self.store.is_simulation(), |d| d.hidden())
-            .h(px(19.0))
-            .px(px(7.0))
-            .rounded(px(2.0))
-            .bg(rgb(if is_current {
-                Theme::PRIMARY
-            } else {
-                Theme::BG_CARD
-            }))
-            .border_1()
-            .border_color(rgb(if is_current {
-                Theme::PRIMARY_HOVER
-            } else {
-                Theme::BORDER_STRONG
-            }))
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .is_some_and(|session| session.role == role);
+        let button = Button::new(id).label(label);
+        let button = if is_current {
+            button.primary()
+        } else {
+            button.outline()
+        };
+        div().when(self.store.is_simulation(), |d| {
+            d.child(button.on_click(cx.listener(move |this, _, _, cx| {
                 this.store.switch_session_role(role);
                 this.session = this.store.current_session();
                 if role != UserRole::Owner && this.current_view == CurrentView::UserManagement {
@@ -2835,26 +2884,15 @@ impl Desktop {
                 }
                 this.status_msg = format!("Beralih simulasi sesi ke peran {}.", role.label());
                 cx.notify();
-            }))
-            .child(
-                div()
-                    .text_size(px(10.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(if is_current {
-                        0xFFFFFF
-                    } else {
-                        Theme::TEXT_SECONDARY
-                    }))
-                    .child(label),
-            )
+            })))
+        })
     }
-
     fn render_sidebar_footer_panel(&self) -> Div {
         let shortcut_hint = match self.current_view {
             CurrentView::CustomerList => {
                 "Cari nama/kode • Pilih baris • Enter: Detail • Ctrl+N: Baru"
             }
-            CurrentView::CustomerDetail => "F3: Belanja • F4: Bayar • F5: Kredit • Esc: Kembali",
+            CurrentView::CustomerDetail => "F3: Belanja • F4: Bayar • Esc: Kembali",
             CurrentView::AgingReport => "Klik kartu umur untuk filter rincian pelanggan",
             CurrentView::UserManagement => "Kelola pengguna, peran, dan reset sandi sementara",
         };
@@ -2918,8 +2956,7 @@ impl Desktop {
                             .child("Akun Anda menggunakan kata sandi sementara setelah pembuatan atau reset. Sesuai kebijakan keamanan, akses ke modul bisnis dikunci hingga Anda mengganti kata sandi (minimal 15 karakter)."),
                     )
                     .child(
-                        primary_action_button("Ganti Kata Sandi Sekarang", "Ctrl+P")
-                            .id("btn-force-change-pw")
+                        Button::new("btn-force-change-pw").primary().label("Ganti kata sandi sekarang")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.open_change_password_modal();
                                 cx.notify();
@@ -2944,32 +2981,27 @@ impl Desktop {
         color_hex: u32,
         border_left_hex: u32,
     ) -> Div {
-        div()
-            .flex_1()
-            .h(px(74.0))
-            .min_w_0()
-            .bg(rgb(Theme::BG_CARD))
-            .border_1()
-            .border_color(rgb(Theme::BORDER_STRONG))
-            .border_l_4()
-            .border_color(rgb(border_left_hex))
-            .px(px(10.0))
-            .py(px(6.0))
-            .rounded(px(3.0))
-            .flex()
-            .flex_col()
-            .justify_between()
-            .child(
+        div().flex_1().min_w_0().child(
+            GroupBox::new().id(title).outline().child(
                 div()
+                    .min_h(px(58.0))
                     .flex()
                     .flex_col()
-                    .gap(px(3.0))
+                    .justify_between()
+                    .gap(px(4.0))
                     .child(
                         div()
-                            .text_size(px(10.5))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(Theme::TEXT_MUTED))
-                            .child(title),
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(div().size(px(7.0)).rounded_full().bg(rgb(border_left_hex)))
+                            .child(
+                                div()
+                                    .text_size(px(10.5))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(Theme::TEXT_MUTED))
+                                    .child(title),
+                            ),
                     )
                     .child(
                         div()
@@ -2977,14 +3009,15 @@ impl Desktop {
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(color_hex))
                             .child(value),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(Theme::TEXT_LIGHT))
+                            .child(subtitle),
                     ),
-            )
-            .child(
-                div()
-                    .text_size(px(10.0))
-                    .text_color(rgb(Theme::TEXT_LIGHT))
-                    .child(subtitle),
-            )
+            ),
+        )
     }
 
     fn detail_financial_badge(
@@ -3036,87 +3069,23 @@ impl Desktop {
             )
     }
 
-    fn native_folder_tab(
-        &self,
-        id: &'static str,
-        label: String,
-        is_active: bool,
-    ) -> gpui::Stateful<Div> {
-        div()
-            .id(id)
-            .h(px(28.0))
-            .px(px(12.0))
-            .bg(rgb(if is_active {
-                Theme::BG_CARD
-            } else {
-                Theme::BG_SIDEBAR
-            }))
-            .border_1()
-            .border_color(rgb(if is_active {
-                Theme::PRIMARY
-            } else {
-                Theme::BORDER_STRONG
-            }))
-            .border_t_2()
-            .rounded(px(3.0))
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .child(
-                div()
-                    .text_size(px(11.5))
-                    .font_weight(if is_active {
-                        FontWeight::BOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .text_color(rgb(if is_active {
-                        Theme::PRIMARY_HOVER
-                    } else {
-                        Theme::TEXT_SECONDARY
-                    }))
-                    .child(label),
-            )
+    fn native_folder_tab(&self, id: &'static str, label: String, is_active: bool) -> Button {
+        let button = Button::new(id).label(label);
+        if is_active {
+            button.primary()
+        } else {
+            button.outline()
+        }
     }
 
-    fn sort_toggle_button(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        is_active: bool,
-    ) -> gpui::Stateful<Div> {
-        div()
-            .id(id)
-            .h(px(25.0))
-            .px(px(9.0))
-            .bg(rgb(if is_active {
-                Theme::PRIMARY
-            } else {
-                Theme::BG_CARD
-            }))
-            .border_1()
-            .border_color(rgb(if is_active {
-                Theme::PRIMARY_HOVER
-            } else {
-                Theme::BORDER_STRONG
-            }))
-            .rounded(px(3.0))
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .child(
-                div()
-                    .text_size(px(10.5))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(if is_active {
-                        0xFFFFFF
-                    } else {
-                        Theme::TEXT_SECONDARY
-                    }))
-                    .child(label),
-            )
+    fn sort_toggle_button(&self, id: &'static str, label: &'static str, is_active: bool) -> Button {
+        let button = Button::new(id).label(label);
+        if is_active {
+            button.primary()
+        } else {
+            button.outline()
+        }
     }
-
     fn native_aging_bucket_card(
         &self,
         id: &'static str,
@@ -3129,54 +3098,54 @@ impl Desktop {
         bucket: Option<usize>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        div()
-            .id(id)
+        Button::new(id)
+            .outline()
+            .accessibility_label(format!("{label}: {amount}"))
             .w(px(160.0))
-            .flex_shrink_0()
             .h(px(62.0))
-            .bg(rgb(if is_active {
-                Theme::BG_ROW_SELECTED
-            } else {
-                Theme::BG_CARD
-            }))
-            .border_1()
+            .flex_shrink_0()
             .border_color(rgb(if is_active {
                 Theme::PRIMARY
             } else {
                 border_hex
             }))
-            .border_t_2()
-            .p(px(7.0))
-            .rounded(px(3.0))
-            .flex()
-            .flex_col()
-            .justify_between()
-            .cursor_pointer()
-            .hover(|d| d.bg(rgb(Theme::BG_ROW_HOVER)))
+            .bg(rgb(if is_active {
+                Theme::BG_ROW_SELECTED
+            } else {
+                Theme::BG_CARD
+            }))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(px(9.5))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(Theme::TEXT_MUTED))
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.5))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(color_hex))
+                            .child(amount),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(9.5))
+                            .text_color(rgb(Theme::TEXT_LIGHT))
+                            .child(desc),
+                    ),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.aging_selected_bucket = bucket;
                 cx.notify();
             }))
-            .child(
-                div()
-                    .text_size(px(9.5))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(Theme::TEXT_MUTED))
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_size(px(12.5))
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(color_hex))
-                    .child(amount),
-            )
-            .child(
-                div()
-                    .text_size(px(9.5))
-                    .text_color(rgb(Theme::TEXT_LIGHT))
-                    .child(desc),
-            )
     }
 
     // =========================================================================

@@ -92,26 +92,49 @@ impl Desktop {
                 .current_detail()
                 .map(|data| data.customer.name.clone())
                 .unwrap_or_else(|| "Pelanggan terpilih".into());
+            let review_row = |label: &'static str, value: String| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(16.0))
+                    .child(
+                        div()
+                            .w(px(100.0))
+                            .flex_shrink_0()
+                            .text_color(rgb(Theme::TEXT_SECONDARY))
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_color(rgb(Theme::TEXT_PRIMARY))
+                            .child(value),
+                    )
+            };
             let mut body = div()
                 .flex()
                 .flex_col()
-                .gap(px(10.))
-                .child(format!("Pelanggan: {customer}"));
+                .gap(px(12.))
+                .child(
+                    div()
+                        .text_color(rgb(Theme::TEXT_SECONDARY))
+                        .child("Periksa kembali data sebelum menyimpan."),
+                )
+                .child(review_row("Pelanggan", customer));
             if is_sale {
                 body = body
-                    .child(format!("Tanggal: {}", self.form_fields[0].1))
-                    .child(format!(
-                        "Referensi: {}",
+                    .child(review_row("Tanggal", self.form_fields[0].1.clone()))
+                    .child(review_row(
+                        "Referensi",
                         if self.form_fields[1].1.is_empty() {
                             "-"
                         } else {
                             &self.form_fields[1].1
                         }
+                        .to_string(),
                     ));
-                if !self.form_fields[2].1.trim().is_empty() {
-                    body = body.child(format!("Alasan tanggal: {}", self.form_fields[2].1));
-                }
                 let mut total = 0_i64;
+                let mut items = div().flex().flex_col().gap(px(8.0));
                 for (description, qty, price) in &self.sale_items {
                     if description.trim().is_empty() && price.trim().is_empty() {
                         continue;
@@ -119,37 +142,86 @@ impl Desktop {
                     let price = parse_money_input(price).unwrap_or(0);
                     let line = compute_line_total_half_up(qty, price).unwrap_or(0);
                     total = total.saturating_add(line);
-                    body = body.child(format!(
-                        "{} × {} @ {}  =  {}",
-                        description,
-                        qty,
-                        format_rupiah(price),
-                        format_rupiah(line)
-                    ));
+                    items = items.child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .gap(px(12.0))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(description.clone())
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(Theme::TEXT_SECONDARY))
+                                            .child(format!("{} × {}", qty, format_rupiah(price))),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(format_rupiah(line)),
+                            ),
+                    );
                 }
-                body = body.child(format!("Total belanja: {}", format_rupiah(total)));
-            } else {
-                let amount = parse_money_input(&self.form_fields[0].1).unwrap_or(0);
                 body = body
-                    .child(format!("Nominal: {}", format_rupiah(amount)))
-                    .child(format!("Tanggal: {}", self.form_fields[1].1))
-                    .child(format!("Metode: {}", self.form_fields[2].1))
-                    .child(format!(
-                        "Referensi: {}",
+                    .child(
+                        div()
+                            .p(px(12.0))
+                            .rounded(px(4.0))
+                            .bg(rgb(Theme::BG_HEADER))
+                            .flex()
+                            .flex_col()
+                            .gap(px(10.0))
+                            .child(div().font_weight(FontWeight::BOLD).child("Rincian barang"))
+                            .child(items),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .font_weight(FontWeight::BOLD)
+                            .child("Total belanja")
+                            .child(format_rupiah(total)),
+                    );
+            } else {
+                let amount = parse_money_input(&self.form_fields[1].1).unwrap_or(0);
+                body = body
+                    .child(review_row("Tanggal", self.form_fields[0].1.clone()))
+                    .child(review_row("Metode", self.form_fields[2].1.clone()))
+                    .child(review_row(
+                        "Referensi",
                         if self.form_fields[3].1.is_empty() {
                             "-"
                         } else {
                             &self.form_fields[3].1
                         }
+                        .to_string(),
                     ))
-                    .child(format!(
-                        "Catatan: {}",
+                    .child(review_row(
+                        "Catatan",
                         if self.form_fields[4].1.is_empty() {
                             "-"
                         } else {
                             &self.form_fields[4].1
                         }
-                    ));
+                        .to_string(),
+                    ))
+                    .child(
+                        div()
+                            .p(px(12.0))
+                            .rounded(px(4.0))
+                            .bg(rgb(Theme::BG_HEADER))
+                            .flex()
+                            .justify_between()
+                            .font_weight(FontWeight::BOLD)
+                            .child("Total pembayaran")
+                            .child(format_rupiah(amount)),
+                    );
             }
             if !self.form_error.is_empty() {
                 body = body.child(
@@ -241,8 +313,9 @@ impl Desktop {
                     .items_center()
                     .justify_end()
                     .child(
-                        primary_action_button("Tutup (Enter / Esc)", "")
-                            .id("btn-notice-ok")
+                        Button::new("btn-notice-ok")
+                            .primary()
+                            .label("Tutup")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.active_modal = None;
                                 cx.notify();
@@ -279,10 +352,10 @@ impl Desktop {
                     .flex()
                     .flex_col()
                     .min_w(px(720.0))
-                    .gap(px(10.0))
-                    // Header Form: Tanggal, Referensi, & Backdate Reason
+                    .gap(px(14.0))
+                    // Header form: tanggal dan referensi.
                     .child(
-                        div().flex().items_center().gap(px(8.0)).children(
+                        div().flex().items_start().gap(px(12.0)).children(
                             self.form_fields
                                 .iter()
                                 .enumerate()
@@ -314,11 +387,7 @@ impl Desktop {
                                                 }))
                                                 .child(format!(
                                                     "{}{}",
-                                                    if f_idx == 2 {
-                                                        "Alasan tanggal lampau (jika diperlukan)"
-                                                    } else {
-                                                        *label
-                                                    },
+                                                    *label,
                                                     if is_focused { " ◀" } else { "" }
                                                 )),
                                         )
@@ -345,7 +414,7 @@ impl Desktop {
                             .flex_col()
                             .child(
                                 div()
-                                    .h(px(26.0))
+                                    .h(px(34.0))
                                     .bg(rgb(Theme::BG_HEADER))
                                     .border_b_1()
                                     .border_color(rgb(Theme::BORDER_STRONG))
@@ -357,26 +426,20 @@ impl Desktop {
                                     .text_color(rgb(Theme::TEXT_SECONDARY))
                                     .child(div().w(px(32.0)).child("NO"))
                                     .child(div().w(px(260.0)).child("NAMA BARANG / URAIAN"))
+                                    .child(div().w(px(95.0)).text_right().pr(px(8.0)).child("QTY"))
                                     .child(
                                         div()
-                                            .w(px(95.0))
+                                            .w(px(130.0))
                                             .text_right()
                                             .pr(px(8.0))
-                                            .child("QTY (MAKS 3 DES)"),
+                                            .child("HARGA SATUAN"),
                                     )
                                     .child(
                                         div()
                                             .w(px(130.0))
                                             .text_right()
                                             .pr(px(8.0))
-                                            .child("HARGA SATUAN (RP)"),
-                                    )
-                                    .child(
-                                        div()
-                                            .w(px(130.0))
-                                            .text_right()
-                                            .pr(px(8.0))
-                                            .child("SUBTOTAL (HALF-UP)"),
+                                            .child("SUBTOTAL"),
                                     )
                                     .child(div().w(px(45.0)).text_center().child("HAPUS")),
                             )
@@ -386,7 +449,7 @@ impl Desktop {
                                         .and_then(|p| compute_line_total_half_up(qty, p).ok());
 
                                     div()
-                                        .h(px(32.0))
+                                        .h(px(44.0))
                                         .px(px(8.0))
                                         .bg(rgb(if r_idx % 2 == 1 {
                                             Theme::BG_ROW_ALT
@@ -469,12 +532,14 @@ impl Desktop {
                                         )
                                         // Tombol Hapus Baris
                                         .child(
-                                            div()
-                                                .id(("s-del", r_idx))
-                                                .w(px(45.0))
-                                                .flex()
-                                                .justify_center()
-                                                .cursor_pointer()
+                                            Button::new(("s-del", r_idx))
+                                                .ghost()
+                                                .label("×")
+                                                .accessibility_label(format!(
+                                                    "Hapus barang {}",
+                                                    r_idx + 1
+                                                ))
+                                                .disabled(self.sale_items.len() <= 1)
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     if this.sale_items.len() > 1 {
                                                         this.sale_items.remove(r_idx);
@@ -482,29 +547,24 @@ impl Desktop {
                                                         this.sale_inputs_initialized = false;
                                                         cx.notify();
                                                     }
-                                                }))
-                                                .child(
-                                                    div()
-                                                        .text_size(px(11.0))
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .text_color(rgb(Theme::BADGE_DEBIT_TEXT))
-                                                        .child("✕"),
-                                                ),
+                                                })),
                                         )
                                 },
                             ))
                             // Footer Tabel: Tambah Baris + Total
                             .child(
                                 div()
-                                    .h(px(34.0))
+                                    .h(px(48.0))
                                     .bg(rgb(Theme::BG_HEADER))
                                     .px(px(8.0))
                                     .flex()
                                     .items_center()
                                     .justify_between()
                                     .child(
-                                        secondary_action_button("+ Tambah Baris Barang Lagi", "")
-                                            .id("btn-sale-add-row")
+                                        Button::new("btn-sale-add-row")
+                                            .outline()
+                                            .label("Tambah barang")
+                                            .track_focus(&self.sale_action_focus[0])
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 let next_idx = this.sale_items.len();
                                                 this.sale_items.push((
@@ -563,7 +623,9 @@ impl Desktop {
                         div()
                             .text_size(px(10.5))
                             .text_color(rgb(Theme::TEXT_MUTED))
-                            .child("Saldo kredit tidak otomatis digunakan untuk belanja baru."),
+                            .child(
+                                "Saldo kredit yang tersedia diterapkan otomatis ke belanja baru.",
+                            ),
                     )
                     .into_any_element();
 
@@ -756,6 +818,9 @@ impl Desktop {
                 Button::new("btn-modal-cancel")
                     .outline()
                     .label("Batal")
+                    .when(self.active_modal == Some(ActiveModal::RecordSale), |b| {
+                        b.track_focus(&self.sale_action_focus[2])
+                    })
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.is_loading {
                             this.active_modal = None;
@@ -767,6 +832,9 @@ impl Desktop {
                 Button::new("btn-modal-submit")
                     .primary()
                     .label(submit_text)
+                    .when(self.active_modal == Some(ActiveModal::RecordSale), |b| {
+                        b.track_focus(&self.sale_action_focus[1])
+                    })
                     .disabled(
                         is_loading
                             || (self.active_modal == Some(ActiveModal::ApplyDeposit)

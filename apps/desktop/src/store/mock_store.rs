@@ -2,8 +2,8 @@
 //! Seluruh perilaku mengikuti spesifikasi final (ADR-007, PRODUCT_SPEC.md, FEATURE_SPECIFICATIONS.md, DATA_DICTIONARY.md):
 //! - BR-005: Nilai uang integer IDR (i64), quantity decimal skala maks 3, pembulatan half-up per item.
 //! - BR-006 / FR-003: Pembayaran dialokasikan FIFO ke debit terbuka terlama; surplus menjadi Saldo Kredit Pelanggan
-//!   dan TIDAK auto-apply pada penjualan baru (hanya diterapkan melalui aksi manual eksplisit dengan alasan audit).
-//! - BR-012 / FR-002: Tanggal masa depan ditolak; backdate hanya Owner dengan alasan wajib.
+//!   dan otomatis diterapkan ke penjualan baru secara FIFO sesuai OQ-28.
+//! - BR-012 / FR-002: Tanggal masa depan ditolak; tanggal lampau diizinkan tanpa alasan.
 //! - FR-004: Saldo berjalan dihitung kronologis `(effective_date, source_order)` dari awal histori meskipun difilter tanggal.
 //! - FR-005: 5 bucket umur piutang (0-15, 16-30, 31-45, 46-60, >60) + unknown_date + future_date = total_open_idr.
 //! - FR-007: Reversal, Reallocation, Merge Customer, dan User Management khusus Owner; kata sandi minimal 15 karakter.
@@ -312,7 +312,7 @@ impl MockDataAdapter {
                 },
             );
         }
-        // Saldo kredit contoh tanpa debit terbuka; tidak dipakai otomatis untuk penjualan baru.
+        // Saldo kredit contoh tanpa debit terbuka untuk menguji penerapan pada penjualan baru.
         self.record_payment(
             "demo-2",
             &RecordPaymentInput {
