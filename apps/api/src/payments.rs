@@ -128,6 +128,7 @@ pub async fn create(
     sqlx::query("INSERT INTO audit_events (id,actor_id,action,entity_type,entity_id,request_id,metadata) VALUES ($1,$2,'payment.post','payment',$3,$4,jsonb_build_object('amount_idr',$5::text,'allocation_count',$6))")
         .bind(Uuid::new_v4()).bind(session.user_id).bind(payment_id).bind(request.0).bind(amount).bind(allocation_count)
         .execute(&mut *tx).await.map_err(|_| request.internal())?;
+    auto_apply_credits(&mut tx, input.customer_id, session.user_id, request).await?;
     let payment = detail(&mut tx, payment_id, request).await?;
     let body = serde_json::to_value(PaymentResponse {
         data: payment,
@@ -257,6 +258,154 @@ pub async fn apply(
     let value = serde_json::json!({"data":{"debit_entry_id":input.debit_entry_id,"amount_idr":amount.to_string()},"meta":{}});
     key.commit(tx, session.user_id, StatusCode::OK, value, request)
         .await
+}
+
+pub async fn auto_apply_credits(
+    tx: &mut Transaction<'_, Postgres>,
+    customer_id: Uuid,
+    actor_id: Uuid,
+    request: RequestId,
+) -> Result<i64, Failure> {
+    lock_customer(tx, customer_id, request).await?;
+
+    let mut total_allocated = 0_i64;
+
+    loop {
+        #[derive(sqlx::FromRow)]
+        struct OpenDebitRow {
+            id: Uuid,
+            remaining_idr: i64,
+        }
+
+        let debit: Option<OpenDebitRow> = sqlx::query_as(
+            "SELECT e.id,
+                    (e.debit_idr - (
+                        SELECT coalesce(sum(pa.amount_idr), 0) FROM payment_allocations pa
+                        JOIN payments p ON p.id = pa.payment_id
+                        WHERE pa.debit_entry_id = e.id AND pa.status = 'active' AND p.status = 'posted'
+                    ) - (
+                        SELECT coalesce(sum(la.amount_idr), 0) FROM legacy_credit_allocations la
+                        WHERE la.debit_entry_id = e.id AND la.status = 'active'
+                    ))::bigint AS remaining_idr
+             FROM receivable_entries e
+             LEFT JOIN credit_sales s ON s.id = e.source_id AND e.entry_type = 'credit_sale'
+             WHERE e.customer_id = $1 AND e.debit_idr > 0
+               AND e.entry_type IN ('legacy_debit', 'credit_sale')
+               AND (e.entry_type <> 'legacy_debit' OR NOT EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id = e.id))
+               AND (e.entry_type = 'legacy_debit' OR s.status = 'posted')
+               AND (e.debit_idr - (
+                   SELECT coalesce(sum(pa.amount_idr), 0) FROM payment_allocations pa
+                   JOIN payments p ON p.id = pa.payment_id
+                   WHERE pa.debit_entry_id = e.id AND pa.status = 'active' AND p.status = 'posted'
+               ) - (
+                   SELECT coalesce(sum(la.amount_idr), 0) FROM legacy_credit_allocations la
+                   WHERE la.debit_entry_id = e.id AND la.status = 'active'
+               )) > 0
+             ORDER BY e.effective_date NULLS LAST, e.source_order NULLS LAST, coalesce(s.posted_at, e.created_at), e.id
+             LIMIT 1 FOR UPDATE OF e",
+        )
+        .bind(customer_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|_| request.internal())?;
+
+        let debit = match debit {
+            Some(d) => d,
+            None => break,
+        };
+
+        #[derive(sqlx::FromRow)]
+        struct OpenCreditRow {
+            source_type: String,
+            source_id: Uuid,
+            remaining_idr: i64,
+        }
+
+        let credit: Option<OpenCreditRow> = sqlx::query_as(
+            "SELECT source_type, src_id AS source_id, rem AS remaining_idr
+             FROM (
+                 SELECT 'payment' AS source_type, p.id AS src_id,
+                        p.received_date AS eff_date, NULL::bigint AS src_ord, p.posted_at AS post_at,
+                        (p.amount_idr - coalesce((SELECT sum(pa.amount_idr) FROM payment_allocations pa WHERE pa.payment_id = p.id AND pa.status = 'active'), 0))::bigint AS rem
+                 FROM payments p
+                 WHERE p.customer_id = $1 AND p.status = 'posted'
+                   AND p.amount_idr > coalesce((SELECT sum(pa.amount_idr) FROM payment_allocations pa WHERE pa.payment_id = p.id AND pa.status = 'active'), 0)
+                 UNION ALL
+                 SELECT 'legacy_payment' AS source_type, e.id AS src_id,
+                        e.effective_date AS eff_date, e.source_order AS src_ord, e.created_at AS post_at,
+                        (e.credit_idr - coalesce((SELECT sum(la.amount_idr) FROM legacy_credit_allocations la WHERE la.payment_entry_id = e.id AND la.status = 'active'), 0))::bigint AS rem
+                 FROM receivable_entries e
+                 WHERE e.customer_id = $1 AND e.entry_type = 'legacy_payment' AND e.credit_idr > 0
+                   AND NOT EXISTS(SELECT 1 FROM payments p WHERE p.id = e.source_id)
+                   AND NOT EXISTS(SELECT 1 FROM transaction_reversals tr WHERE tr.original_entry_id = e.id)
+                   AND e.credit_idr > coalesce((SELECT sum(la.amount_idr) FROM legacy_credit_allocations la WHERE la.payment_entry_id = e.id AND la.status = 'active'), 0)
+             ) creds
+             ORDER BY eff_date NULLS LAST, src_ord NULLS LAST, post_at, src_id
+             LIMIT 1",
+        )
+        .bind(customer_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|_| request.internal())?;
+
+        let credit = match credit {
+            Some(c) => c,
+            None => break,
+        };
+
+        let alloc_amt = debit.remaining_idr.min(credit.remaining_idr);
+        if alloc_amt <= 0 {
+            break;
+        }
+
+        let alloc_id = Uuid::new_v4();
+        if credit.source_type == "payment" {
+            sqlx::query(
+                "INSERT INTO payment_allocations (id, payment_id, debit_entry_id, amount_idr, status, created_by, reason)
+                 VALUES ($1, $2, $3, $4, 'active', $5, 'Auto-apply dari deposit pelanggan')",
+            )
+            .bind(alloc_id)
+            .bind(credit.source_id)
+            .bind(debit.id)
+            .bind(alloc_amt)
+            .bind(actor_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|_| request.internal())?;
+        } else {
+            sqlx::query(
+                "INSERT INTO legacy_credit_allocations (id, payment_entry_id, debit_entry_id, amount_idr, status, created_by)
+                 VALUES ($1, $2, $3, $4, 'active', $5)",
+            )
+            .bind(alloc_id)
+            .bind(credit.source_id)
+            .bind(debit.id)
+            .bind(alloc_amt)
+            .bind(actor_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|_| request.internal())?;
+        }
+
+        sqlx::query(
+            "INSERT INTO audit_events (id, actor_id, action, entity_type, entity_id, reason, request_id, metadata)
+             VALUES ($1, $2, 'credit.auto_apply', $3, $4, 'Auto-apply saldo kredit pelanggan ke transaksi piutang', $5, jsonb_build_object('debit_entry_id', $6::uuid, 'amount_idr', $7::text))",
+        )
+        .bind(Uuid::new_v4())
+        .bind(actor_id)
+        .bind(&credit.source_type)
+        .bind(credit.source_id)
+        .bind(request.0)
+        .bind(debit.id)
+        .bind(alloc_amt)
+        .execute(&mut **tx)
+        .await
+        .map_err(|_| request.internal())?;
+
+        total_allocated += alloc_amt;
+    }
+
+    Ok(total_allocated)
 }
 
 pub async fn get(

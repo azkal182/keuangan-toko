@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::{
     auth::Session,
     error::{Body, Failure, RequestId, RouteId},
-    ledger,
+    ledger, payments,
 };
 
 #[derive(sqlx::FromRow)]
@@ -197,6 +197,7 @@ pub async fn post(
          VALUES ($1, $2, 'credit_sale.post', 'credit_sale', $3, $4, $5, jsonb_build_object('ledger_entry_id', $6::uuid))",
     ).bind(Uuid::new_v4()).bind(session.user_id).bind(id).bind(audit_reason).bind(request.0).bind(entry)
         .execute(&mut *tx).await.map_err(|_| request.internal())?;
+    payments::auto_apply_credits(&mut tx, current.customer_id, session.user_id, request).await?;
     let sale = detail(&mut tx, request, id).await?;
     let balance = ledger::summary(&mut tx, current.customer_id, request).await?;
     let body = serde_json::to_value(PostSaleResponse {

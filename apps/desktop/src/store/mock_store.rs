@@ -1270,8 +1270,71 @@ impl TokoStoreAdapter for MockDataAdapter {
         }
         self.next_source_order = current_order;
 
-        // Sesuai BR-006 & FR-003: Surplus / Saldo Kredit Pelanggan TIDAK auto-apply pada penjualan baru.
-        // Operator/Owner menerapkannya secara eksplisit melalui menu "Terapkan Saldo Kredit".
+        // Auto-apply deposit pelanggan FIFO saat penjualan baru (Opsi A)
+        let payment_ids: Vec<String> = cust
+            .payments
+            .iter()
+            .filter(|p| p.status == "posted")
+            .map(|p| p.id.clone())
+            .collect();
+        for pay_id in payment_ids {
+            let payment_amt = cust
+                .payments
+                .iter()
+                .find(|p| p.id == pay_id)
+                .map(|p| p.amount_idr)
+                .unwrap_or(0);
+            let pay_allocated: i64 = cust
+                .allocations
+                .iter()
+                .filter(|a| a.payment_id == pay_id)
+                .map(|a| a.amount_idr)
+                .sum();
+            let mut unallocated = payment_amt.saturating_sub(pay_allocated);
+            if unallocated <= 0 {
+                continue;
+            }
+
+            let entry_ids: Vec<String> = cust
+                .entries
+                .iter()
+                .filter(|e| e.debit_idr > 0 && !e.is_reversed)
+                .map(|e| e.id.clone())
+                .collect();
+            for ent_id in entry_ids {
+                let debit_amt = cust
+                    .entries
+                    .iter()
+                    .find(|e| e.id == ent_id)
+                    .map(|e| e.debit_idr)
+                    .unwrap_or(0);
+                let debit_allocated: i64 = cust
+                    .allocations
+                    .iter()
+                    .filter(|a| a.debit_id == ent_id)
+                    .map(|a| a.amount_idr)
+                    .sum();
+                let debit_remaining = debit_amt.saturating_sub(debit_allocated);
+                if debit_remaining <= 0 {
+                    continue;
+                }
+
+                let to_apply = unallocated.min(debit_remaining);
+                if to_apply > 0 {
+                    cust.allocations.push(InternalAllocation {
+                        payment_id: pay_id.clone(),
+                        debit_id: ent_id,
+                        amount_idr: to_apply,
+                        reason: "Auto-apply dari deposit pelanggan".into(),
+                    });
+                    unallocated -= to_apply;
+                    if unallocated == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
         Ok(total_sale)
     }
 
@@ -1954,7 +2017,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_sale_does_not_auto_apply_deposit_and_explicit_credit_application_works() {
+    fn test_new_sale_auto_applies_deposit_fifo() {
         let mut store = MockDataAdapter::new();
         // Toko Berkah Abadi punya deposit Rp 500.000
         let berkah = store
@@ -1983,13 +2046,12 @@ mod tests {
         let total = store.create_instant_sale(&berkah.id, &sale_input).unwrap();
         assert_eq!(total, 150_000);
 
-        // Sesuai BR-006 / FR-003: Kredit TIDAK auto-apply! Piutang tetap 150.000 dan kredit tetap 500.000
+        // Auto-apply deposit pelanggan FIFO (Opsi A): Piutang tetap 0, deposit berkurang menjadi 350.000
         let after_sale = store.get_customer(&berkah.id).unwrap();
-        assert_eq!(after_sale.outstanding_idr, 150_000);
-        assert_eq!(after_sale.customer_credit_idr, 500_000);
+        assert_eq!(after_sale.outstanding_idr, 0);
+        assert_eq!(after_sale.customer_credit_idr, 350_000);
 
-        // Sekarang terapkan saldo kredit secara eksplisit dengan alasan audit (API-302)
-        let payments = store.list_payments(&berkah.id).unwrap();
+        // Transaksi belanja baru langsung berstatus lunas
         let ledger = store
             .get_ledger(
                 &berkah.id,
@@ -2000,23 +2062,13 @@ mod tests {
                 },
             )
             .unwrap();
-        let open_debit = ledger.entries.iter().find(|e| e.remaining_idr > 0).unwrap();
-
-        store
-            .apply_credit(
-                &berkah.id,
-                &ApplyCreditInput {
-                    payment_id: payments[0].id.clone(),
-                    debit_entry_id: open_debit.id.clone(),
-                    amount_idr: 150_000,
-                    reason: "Potong deposit uang muka pelanggan".into(),
-                },
-            )
+        let new_entry = ledger
+            .entries
+            .iter()
+            .find(|e| e.description == "KERTAS F4 1 DUS")
             .unwrap();
-
-        let after_apply = store.get_customer(&berkah.id).unwrap();
-        assert_eq!(after_apply.outstanding_idr, 0);
-        assert_eq!(after_apply.customer_credit_idr, 350_000);
+        assert_eq!(new_entry.remaining_idr, 0);
+        assert_eq!(new_entry.allocated_idr, 150_000);
     }
 
     #[test]
